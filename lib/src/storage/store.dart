@@ -81,9 +81,13 @@ final class Store {
   int get version => _db.select("PRAGMA user_version").first.values.first as int;
 
   /// Runs [body] as one transaction. It commits if [body] returns and rolls back if it throws.
-  /// Not reentrant: a write never starts another one.
+  ///
+  /// A write called from inside another one **joins** it: one transaction, committed or rolled
+  /// back as a whole. That is how an op's change and its `commandId` answer commit together
+  /// (the RPC layer wraps the domain's own write). The body is synchronous, so nothing else can
+  /// run in between.
   T write<T>(T Function(Database db) body) {
-    if (_writing) throw StateError("A write is already running");
+    if (_writing) return body(_db);
 
     _writing = true;
     _db.execute("BEGIN IMMEDIATE");

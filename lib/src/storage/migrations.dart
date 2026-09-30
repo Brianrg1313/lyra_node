@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 
 import 'migrations/m001_core.dart';
+import 'migrations/m002_network.dart';
 import 'store.dart';
 
 /// One schema step. [sql] is plain SQLite (several statements). Kept as Dart constants, not
@@ -17,7 +18,7 @@ final class Migration {
 
 /// Every migration, in order. **Forward only**: a released migration is never edited; a fix is
 /// a new one.
-const List<Migration> migrations = [m001Core];
+const List<Migration> migrations = [m001Core, m002Network];
 
 /// The database was written by a newer engine. Opening it could lose what that version added,
 /// so it's refused (plan §10.2): update the app on the master.

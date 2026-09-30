@@ -42,7 +42,7 @@ void main() {
       expect(owner.isOwner, isTrue);
       expect(engine.audit.list().map((e) => e.kind), [
         AuditKinds.keyringCreated,
-        AuditKinds.migrationApplied,
+        for (final _ in migrations) AuditKinds.migrationApplied,
         AuditKinds.accountCreated,
         AuditKinds.engineStart,
       ]);

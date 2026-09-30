@@ -1,0 +1,57 @@
+import 'package:lyra_protocol/lyra_protocol.dart';
+
+import '../failure.dart';
+
+/// Turns a refusal into the `{code, message, action, data}` a client shows
+/// (`protocol-v1.md` §2).
+///
+/// Messages are English until the company's language exists (the business domain, plan phase
+/// 4); the app's i18n is English-only today too. A client branches on `code`, never on the text.
+abstract final class Messages {
+  static const Map<String, String> _text = {
+    ErrorCodes.badRequest: "The request is not valid.",
+    ErrorCodes.unknownOp: "This server doesn't know that operation. Update Lyra on the server.",
+    ErrorCodes.invalidField: "A field is not valid.",
+    ErrorCodes.required: "A required field is missing.",
+    ErrorCodes.notFound: "It doesn't exist or you can't see it.",
+    ErrorCodes.forbidden: "You don't have permission to do that.",
+    ErrorCodes.sessionExpired: "Your session expired. Sign in again.",
+    ErrorCodes.sessionRevoked: "Your session was ended. Sign in again.",
+    ErrorCodes.deviceRevoked: "This device was removed from the server. Pair it again.",
+    ErrorCodes.locked: "The server is locked. Ask someone to unlock it on the server computer.",
+    ErrorCodes.rateLimited: "Too many requests. Wait a moment.",
+    ErrorCodes.versionMismatch: "This app and the server don't speak the same version. Update Lyra.",
+    ErrorCodes.updateRequired: "This app is too old for the server. Update Lyra.",
+    ErrorCodes.commandReused: "The request was sent twice with different data.",
+    ErrorCodes.resyncRequired: "Reloading: too much changed while you were away.",
+    ErrorCodes.needsInternet: "This needs an internet connection.",
+    ErrorCodes.frameTooLarge: "The request is too large.",
+    ErrorCodes.internal: "Something went wrong on the server.",
+    "invalid_credentials": "Wrong username or password.",
+    "account_locked": "Too many failed attempts. Try again later.",
+    "account_disabled": "This account is disabled.",
+    "weak_password": "The password must have at least 10 characters.",
+    "wrong_passphrase": "Wrong passphrase.",
+    "not_master": "Only the server computer can do that.",
+    "self": "The server's own device can't be removed.",
+    "invalid_file": "The file is not a type or size that can be used here.",
+  };
+
+  /// Codes whose client must go somewhere (`ErrorActions`).
+  static const Map<String, String> _actions = {
+    ErrorCodes.sessionExpired: ErrorActions.login,
+    ErrorCodes.sessionRevoked: ErrorActions.login,
+    ErrorCodes.deviceRevoked: ErrorActions.login,
+    ErrorCodes.versionMismatch: ErrorActions.update,
+    ErrorCodes.updateRequired: ErrorActions.update,
+  };
+
+  static RpcError of(String code, [Map<String, Object?> data = const {}]) => RpcError(
+    code,
+    _text[code] ?? _text[ErrorCodes.internal]!,
+    action: _actions[code],
+    data: data.isEmpty ? null : data,
+  );
+
+  static RpcError ofFailure(EngineFailure failure) => of(failure.code, failure.data);
+}

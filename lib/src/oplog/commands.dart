@@ -4,8 +4,6 @@ import 'package:crypto/crypto.dart';
 import 'package:lyra_protocol/lyra_protocol.dart';
 import 'package:sqlite3/sqlite3.dart';
 
-import '../canonical_json.dart';
-
 /// A `commandId` came back with different arguments (`command_reused`): a client bug, never a
 /// retry.
 final class CommandReused implements Exception {

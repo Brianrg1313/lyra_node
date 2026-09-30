@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'package:crypto/crypto.dart';
 import 'package:sqlite3/sqlite3.dart';
 
-import '../canonical_json.dart';
+import 'package:lyra_protocol/lyra_protocol.dart' show canonicalJson;
 
 /// What the audit log records (plan §6.6). Stable strings: exports and support read them.
 abstract final class AuditKinds {
@@ -15,6 +15,13 @@ abstract final class AuditKinds {
   static const accountCreated = "account.created";
   static const signInFailed = "auth.failed";
   static const accountLocked = "auth.locked";
+  static const signedIn = "auth.signed_in";
+  static const refreshReused = "auth.refresh_reused";
+  static const passwordChanged = "account.password_changed";
+  static const devicePaired = "device.paired";
+  static const deviceRevoked = "device.revoked";
+  static const pairingFailed = "pairing.failed";
+  static const engineUnlocked = "engine.unlocked";
 }
 
 final class AuditEntry {

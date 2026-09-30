@@ -13,12 +13,18 @@ import 'package:lyra_protocol/lyra_protocol.dart';
 ///
 /// | command | stdin | stdout |
 /// |---|---|---|
-/// | `setup` | `{owner: {username, password, firstName, lastName, email?}, passphrase?}` | `{instanceId, recovery: [24 words]}` |
-/// | `run` | the passphrase, one line, with `--passphrase-stdin` | nothing; runs until stopped |
+/// | `setup` | `{owner: {username, password, firstName, lastName, email?}, device?, passphrase?}` | `{instanceId, recovery: [24 words], device?}` |
+/// | `run [--port <n>] [--web <folder>]` | the passphrase, one line, with `--passphrase-stdin` | nothing; runs until stopped |
 /// | `status` | — | `{status, pid?, version?, instanceId?, port?}` |
 /// | `stop` | — | `{stopped: bool}` |
-/// | `recover` | `{words, passphrase?}` | `{instanceId}` |
+/// | `recover` | `{words, passphrase?, device?}` | `{instanceId, device?}` |
+/// | `enroll` | `{device, passphrase?}` | `{instanceId, device}` |
 /// | `version` | — | `{engine, protocol, minApp}` |
+///
+/// `device` is the master's own app: `{name, platform, appVersion, publicKey}` (base64 SPKI of
+/// the key it keeps). The answer's `device` is `{deviceId, code, certificate, caCertificate}`,
+/// what it connects with (plan §3). `enroll` issues a new one when the app lost its key; like
+/// `recover`, it needs the engine stopped.
 ///
 /// A refusal prints `{error: <code>}` and exits with [ExitCodes.failed].
 Future<void> main(List<String> arguments) async {
@@ -36,16 +42,24 @@ Future<void> main(List<String> arguments) async {
           paths: paths,
           vault: vault,
           owner: OwnerDraft.fromJson((input["owner"] as Map?)?.cast<String, Object?>() ?? const {}),
+          device: _device(input),
           passphrase: input["passphrase"] as String?,
         );
-        _answer({"instanceId": result.instanceId, "recovery": result.recovery.words});
+        _answer({
+          "instanceId": result.instanceId,
+          "recovery": result.recovery.words,
+          if (result.device != null) "device": result.device!.toJson(),
+        });
 
       case "run":
         final fromStdin = args.contains("--passphrase-stdin");
+        final port = _option(args, "--port");
         final runner = NodeRunner(
           paths,
           vault,
           passphrase: fromStdin ? () async => stdin.readLineSync(encoding: utf8) : null,
+          port: port == null ? defaultPort : int.parse(port),
+          webRoot: _option(args, "--web"),
         );
         exitCode = await runner.run();
 
@@ -66,19 +80,36 @@ Future<void> main(List<String> arguments) async {
 
       case "recover":
         final input = await _readJson();
-        await Engine.recover(
-          paths: paths,
-          vault: vault,
-          key: RecoveryKey.parse(input["words"] as String? ?? ""),
-          passphrase: input["passphrase"] as String?,
-        );
-        _answer({"instanceId": KeyringStore(paths.keyring, vault).instanceId});
+        final device = _device(input);
+
+        await _stopped(paths, () async {
+          await Engine.recover(
+            paths: paths,
+            vault: vault,
+            key: RecoveryKey.parse(input["words"] as String? ?? ""),
+            passphrase: input["passphrase"] as String?,
+          );
+          _answer({
+            "instanceId": KeyringStore(paths.keyring, vault).instanceId,
+            if (device != null) "device": (await _enroll(paths, vault, device, input["passphrase"] as String?)).toJson(),
+          });
+        });
+
+      case "enroll":
+        final input = await _readJson();
+        final device = _device(input);
+        if (device == null) throw const FormatException("device is required");
+
+        await _stopped(paths, () async => _answer({
+          "instanceId": KeyringStore(paths.keyring, vault).instanceId,
+          "device": (await _enroll(paths, vault, device, input["passphrase"] as String?)).toJson(),
+        }));
 
       case "version":
         _answer({"engine": engineVersion, "protocol": protocolVersion, "minApp": minAppVersion});
 
       default:
-        stderr.writeln("usage: lyra_node setup|run|status|stop|recover|version [--data <folder>]");
+        stderr.writeln("usage: lyra_node setup|run|status|stop|recover|enroll|version [--data <folder>]");
         exitCode = ExitCodes.usage;
     }
   } on EngineFailure catch (failure) {
@@ -91,6 +122,42 @@ Future<void> main(List<String> arguments) async {
     _fail("database_too_new");
   } on FormatException {
     _fail(ErrorCodes.badRequest);
+  }
+}
+
+DeviceDraft? _device(Map<String, Object?> input) {
+  if (input["device"] == null) return null;
+
+  return DeviceDraft.tryParse(input["device"]) ?? (throw const FormatException("device is not valid"));
+}
+
+/// Runs [body] holding the instance lock: the engine's files are only touched while no engine
+/// runs on them. A running one answers [ExitCodes.alreadyRunning].
+Future<void> _stopped(NodePaths paths, Future<void> Function() body) async {
+  Directory(paths.root).createSync(recursive: true);
+  final lock = InstanceLock.tryAcquire(paths.lock);
+
+  if (lock == null) {
+    stdout.writeln(jsonEncode({"error": "engine_running"}));
+    exitCode = ExitCodes.alreadyRunning;
+    return;
+  }
+
+  try {
+    await body();
+  } finally {
+    lock.release();
+  }
+}
+
+/// Enrols the master's app on an engine opened for it, then closes the engine.
+Future<EnrolledDevice> _enroll(NodePaths paths, KeyVault vault, DeviceDraft device, String? passphrase) async {
+  final engine = await Engine.open(paths: paths, vault: vault, passphrase: passphrase);
+
+  try {
+    return await engine.enrollMaster(device, controlKey: await Engine.controlKey(vault, engine.instanceId));
+  } finally {
+    engine.close();
   }
 }
 

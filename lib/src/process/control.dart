@@ -5,7 +5,7 @@ import 'dart:typed_data';
 import 'package:crypto/crypto.dart';
 import 'package:path/path.dart' as p;
 
-import '../canonical_json.dart';
+import 'package:lyra_protocol/lyra_protocol.dart' show canonicalJson;
 import '../crypto/secrets.dart';
 import 'paths.dart';
 

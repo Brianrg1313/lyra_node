@@ -9,7 +9,8 @@ Future<void> main(List<String> args) async {
   final passphrase = args.length > 2 ? args[2] : null;
   final process = await Process.start(
     args[0],
-    ["run", "--data", args[1], if (passphrase != null) "--passphrase-stdin"],
+    // A free port: several tests (and a real master) may run at once.
+    ["run", "--data", args[1], "--port", "0", if (passphrase != null) "--passphrase-stdin"],
     mode: passphrase == null ? ProcessStartMode.detached : ProcessStartMode.detachedWithStdio,
   );
 

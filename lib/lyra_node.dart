@@ -1,10 +1,9 @@
-/// The Lyra engine: the master's encrypted storage, keys, oplog, identities, audit and process
-/// lifecycle (`lyra/app/docs/plan-offline-lan.md`, phase 2). The network layer arrives in
-/// phase 3, the domains in phase 4.
+/// The Lyra engine: the master's encrypted storage, keys, oplog, identities, audit, process
+/// lifecycle (`lyra/app/docs/plan-offline-lan.md`, phase 2) and the LAN server (phase 3). The
+/// domains arrive in phase 4.
 library;
 
 export 'src/audit/audit_log.dart';
-export 'src/canonical_json.dart';
 export 'src/crypto/envelope.dart';
 export 'src/crypto/keyring.dart';
 export 'src/crypto/recovery.dart';
@@ -13,8 +12,18 @@ export 'src/crypto/vault.dart';
 export 'src/engine.dart';
 export 'src/failure.dart';
 export 'src/identity/accounts.dart';
+export 'src/identity/devices.dart';
 export 'src/identity/passwords.dart';
+export 'src/identity/permissions.dart';
+export 'src/identity/sessions.dart';
 export 'src/ids.dart';
+export 'src/net/discovery.dart';
+export 'src/net/events.dart';
+export 'src/net/files.dart';
+export 'src/net/pairing.dart';
+export 'src/net/server.dart';
+export 'src/net/tls.dart';
+export 'src/net/x509.dart';
 export 'src/oplog/commands.dart';
 export 'src/oplog/hlc.dart';
 export 'src/oplog/oplog.dart';

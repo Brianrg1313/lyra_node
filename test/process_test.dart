@@ -6,6 +6,8 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:lyra_node/lyra_node.dart';
+import 'package:lyra_protocol/io.dart';
+import 'package:lyra_protocol/lyra_protocol.dart';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
@@ -88,7 +90,7 @@ void main() {
     expect(status["version"], engineVersion);
 
     // A second engine on the same data refuses to start.
-    final second = await Process.run(exe, ["run", "--data", paths.root]);
+    final second = await Process.run(exe, ["run", "--data", paths.root, "--port", "0"]);
     expect(second.exitCode, ExitCodes.alreadyRunning);
 
     expect((await cli(["stop"]))["stopped"], isTrue);
@@ -122,6 +124,44 @@ void main() {
 
     expect((await cli(["status"]))["status"], "unverified");
     expect((await cli(["stop"]))["stopped"], isTrue);
+  }, timeout: const Timeout(Duration(minutes: 3)));
+
+  test('the running engine serves the master app over mutual TLS, as the app connects to it', () async {
+    final key = EcKeyPair.generate();
+    final device = {"name": "Server", "platform": "windows", "appVersion": "0.0.7", "publicKey": base64.encode(key.spki)};
+    final setup = await cli(["setup"], input: jsonEncode({
+      "owner": {"username": "owner", "password": "correct horse battery", "firstName": "Ada", "lastName": "L"},
+      "device": device,
+    }));
+    final enrolled = setup["device"] as Map<String, Object?>;
+
+    await launch();
+    expect(await statusUntil({"ready"}), "ready");
+
+    final port = (await cli(["status"]))["port"] as int;
+    final client = await connectRpc("127.0.0.1", port, LanIdentity(
+      caCertificate: base64.decode(enrolled["caCertificate"] as String),
+      certificate: base64.decode(enrolled["certificate"] as String),
+      privateKeyPem: key.privateKeyPem,
+    ));
+
+    expect((await client.hello(app: "0.0.7", platform: "windows")).state, EngineState.ready);
+    await client.call(Ops.authSignIn, args: {"login": "owner", "password": "correct horse battery"});
+    await client.close();
+
+    // Enrolling touches the engine's files: refused while it runs.
+    final enroll = await Process.start(exe, ["enroll", "--data", paths.root]);
+    enroll.stdin.write(jsonEncode({"device": device}));
+    await enroll.stdin.close();
+    await enroll.stdout.drain<void>();
+    expect(await enroll.exitCode, ExitCodes.alreadyRunning);
+
+    expect((await cli(["stop"]))["stopped"], isTrue);
+
+    // Stopped, the app may enrol a new key; the old certificate is then refused.
+    final fresh = EcKeyPair.generate();
+    final again = await cli(["enroll"], input: jsonEncode({"device": {...device, "publicKey": base64.encode(fresh.spki)}}));
+    expect((again["device"] as Map)["code"], "B");
   }, timeout: const Timeout(Duration(minutes: 3)));
 
   test('setup refuses a second master and prints the refusal as JSON', () async {

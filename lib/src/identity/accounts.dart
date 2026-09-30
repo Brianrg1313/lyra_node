@@ -183,6 +183,41 @@ final class Accounts {
     return byId(id)!;
   }
 
+  /// First half of changing [accountId]'s own password (`session.md` S-9): checks the current
+  /// one like a sign in (a wrong one counts towards the lockout) and the new one's rules, and
+  /// answers its hash for [setPassword]. Split in two so the caller commits the change in its
+  /// own write (with its `commandId` answer) after the slow hashing.
+  Future<String> newPasswordHash(String accountId, {required String current, required String password, String? device}) async {
+    final account = byId(accountId);
+    if (account == null) throw const EngineFailure(ErrorCodes.notFound);
+
+    await verifyPassword(account.username, current, device: device);
+    _checkPassword(password);
+
+    return _hasher.hash(password);
+  }
+
+  void setPassword(String accountId, String hash, {String? device}) => _store.write((db) {
+    db.execute(
+      "UPDATE accounts SET password = ?, must_change_password = 0, updated_hlc = ? WHERE id = ?",
+      [hash, _clock.tick().pack(), accountId],
+    );
+    AuditLog(db, now: _now).append(AuditKinds.passwordChanged, actor: accountId, device: device, data: {
+      "account": accountId,
+    });
+  });
+
+  /// Whether [login] could sign in with a password (`auth.identify`). Unknown logins answer
+  /// true too, so the answer doesn't tell who has an account.
+  bool usesPassword(String login) {
+    final rows = _db.select(
+      "SELECT status FROM accounts WHERE deleted = 0 AND (lower(username) = lower(?1) OR lower(email) = lower(?1))",
+      [login.trim()],
+    );
+
+    return rows.isEmpty || rows.first["status"] != AccountStatus.pending.name;
+  }
+
   void _recordFailure(String id, String? device) {
     _store.write((db) {
       db.execute("UPDATE accounts SET failed_attempts = failed_attempts + 1 WHERE id = ?", [id]);

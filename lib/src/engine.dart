@@ -1,5 +1,8 @@
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
+
+import 'package:lyra_protocol/lyra_protocol.dart' show PairingDevice;
 
 import 'audit/audit_log.dart';
 import 'crypto/keyring.dart';
@@ -8,8 +11,13 @@ import 'crypto/secrets.dart';
 import 'crypto/vault.dart';
 import 'failure.dart';
 import 'identity/accounts.dart';
+import 'identity/devices.dart';
 import 'identity/passwords.dart';
+import 'identity/sessions.dart';
 import 'ids.dart';
+import 'net/events.dart';
+import 'net/files.dart';
+import 'net/tls.dart';
 import 'oplog/commands.dart';
 import 'oplog/hlc.dart';
 import 'oplog/oplog.dart';
@@ -18,7 +26,7 @@ import 'storage/migrations.dart';
 import 'storage/store.dart';
 
 /// This engine's version, answered in `hello` (`protocol-v1.md` §4).
-const String engineVersion = "0.1.0";
+const String engineVersion = "0.2.0";
 
 /// The oldest app this engine serves (`update_required` below it).
 const String minAppVersion = "0.0.6";
@@ -48,6 +56,55 @@ final class OwnerDraft {
   final String? email;
 }
 
+/// The master's own app, enrolled as its device at setup, recovery or `lyra_node enroll`
+/// (plan §3: the app talks to its engine like any client, with its own certificate).
+final class DeviceDraft {
+  const DeviceDraft({required this.device, required this.publicKey});
+
+  /// Null when [json] isn't a device with a public key.
+  static DeviceDraft? tryParse(Object? json) {
+    if (json is! Map) return null;
+
+    final device = PairingDevice.tryParse(json);
+    final key = json["publicKey"];
+
+    if (device == null || key is! String) return null;
+
+    try {
+      return DeviceDraft(device: device, publicKey: base64.decode(key));
+    } on FormatException {
+      return null;
+    }
+  }
+
+  final PairingDevice device;
+
+  /// SPKI of the key the app created and keeps.
+  final Uint8List publicKey;
+}
+
+/// What an enrolled master app keeps (`lyra_node setup`, `recover` and `enroll` answer it).
+final class EnrolledDevice {
+  const EnrolledDevice({
+    required this.deviceId,
+    required this.code,
+    required this.certificate,
+    required this.caCertificate,
+  });
+
+  final String deviceId;
+  final String code;
+  final Uint8List certificate;
+  final Uint8List caCertificate;
+
+  Map<String, Object?> toJson() => {
+    "deviceId": deviceId,
+    "code": code,
+    "certificate": base64.encode(certificate),
+    "caCertificate": base64.encode(caCertificate),
+  };
+}
+
 /// A master's data, open: the keys in memory, the database, and what writes to it.
 ///
 /// [Engine.setup] makes a new master; [Engine.open] opens an existing one. Nothing here knows
@@ -71,7 +128,76 @@ final class Engine {
 
   CommandLedger get commands => CommandLedger(store.db);
 
-  Accounts get accounts => Accounts(store, clock, hasher: _hasher, now: _now);
+  late final Accounts accounts = Accounts(store, clock, hasher: _hasher, now: _now);
+
+  Devices get devices => Devices(store, clock, now: _now);
+
+  /// Sessions hold access tokens in memory: one instance for the engine's life.
+  late final Sessions sessions = Sessions(store, now: _now);
+
+  late final EventLog events = EventLog(store, now: _now);
+
+  late final Authority authority = Authority.ensure(store, instanceId, now: _now());
+
+  late final FileStore files;
+
+  DateTime now() => _now();
+
+  /// Issues a certificate for the master's own app and enrolls it as the master device (the
+  /// previous one is revoked), then records it in the transport file, so a locked engine still
+  /// knows which device may unlock it.
+  Future<EnrolledDevice> enrollMaster(DeviceDraft draft, {required Uint8List controlKey, String? by}) async {
+    final id = newId();
+    final certificate = authority.issueDevice(draft.publicKey, id, now: _now());
+    final device = devices.enroll(
+      id: id,
+      name: draft.device.name,
+      platform: draft.device.platform,
+      appVersion: draft.device.appVersion,
+      kind: DeviceKind.master,
+      publicKey: draft.publicKey,
+      certFingerprint: certificate.fingerprint,
+      pairedBy: by ?? _owner,
+    );
+
+    await prepareTransport(controlKey);
+
+    return EnrolledDevice(
+      deviceId: device.id,
+      code: device.code,
+      certificate: certificate.der,
+      caCertificate: authority.pinned.der,
+    );
+  }
+
+  /// The transport file for this start. Issued again when it is missing, names other addresses
+  /// than this computer has now, is past half its life, or names another master device.
+  Future<Transport> prepareTransport(Uint8List controlKey) async {
+    final addresses = await LocalAddresses.current();
+    final master = devices.master?.certFingerprint;
+    final existing = await Transport.read(paths.transport, controlKey);
+    final Transport transport;
+
+    if (existing == null ||
+        existing.ca.fingerprint != authority.pinned.fingerprint ||
+        existing.needsRenewal(addresses, now: _now())) {
+      transport = Transport.issue(authority, addresses, masterDevice: master, now: _now());
+    } else if (existing.masterDevice != master) {
+      transport = existing.withMaster(master);
+    } else {
+      return existing;
+    }
+
+    await transport.write(paths.transport, controlKey);
+
+    return transport;
+  }
+
+  String? get _owner {
+    final rows = store.db.select("SELECT account FROM grants WHERE permission = '*' ORDER BY account LIMIT 1");
+
+    return rows.isEmpty ? null : rows.first["account"] as String;
+  }
 
   /// The name of the control key in the OS vault (`ControlChannel`, `EngineStatusFile`).
   static String controlKeyName(String instanceId) => "control.$instanceId";
@@ -94,10 +220,11 @@ final class Engine {
   /// [passphrase] chooses passphrase mode. Answers the recovery key, **the only time it exists
   /// outside the owner's hands**. If anything fails, whatever was already written is removed,
   /// so a second try starts clean.
-  static Future<({String instanceId, RecoveryKey recovery})> setup({
+  static Future<({String instanceId, RecoveryKey recovery, EnrolledDevice? device})> setup({
     required NodePaths paths,
     required KeyVault vault,
     required OwnerDraft owner,
+    DeviceDraft? device,
     String? passphrase,
     Argon2Params params = Argon2Params.standard,
     PasswordHasher hasher = const PasswordHasher(),
@@ -116,7 +243,7 @@ final class Engine {
     Keyring? keyring;
 
     try {
-      await controlKey(vault, instanceId);
+      final control = await controlKey(vault, instanceId);
 
       final created = await keyrings.create(instanceId: instanceId, passphrase: passphrase, params: params);
       keyring = created.keyring;
@@ -146,7 +273,19 @@ final class Engine {
         email: owner.email,
       );
 
-      return (instanceId: instanceId, recovery: created.recovery);
+      // The CA, the server certificate and the master's own device, so the first start already
+      // serves the LAN (plan §5.3).
+      final engine = Engine._(paths, keyring, store, hlc, clock, hasher)
+        ..files = await _files(paths, store, keyring, clock);
+      EnrolledDevice? enrolled;
+
+      if (device != null) {
+        enrolled = await engine.enrollMaster(device, controlKey: control);
+      } else {
+        await engine.prepareTransport(control);
+      }
+
+      return (instanceId: instanceId, recovery: created.recovery, device: enrolled);
     } catch (_) {
       store?.close();
       store = null;
@@ -195,7 +334,7 @@ final class Engine {
         HlcClock(keyring.instanceId, last: Oplog(store.db).lastHlc),
         clock,
         hasher,
-      );
+      )..files = await _files(paths, store, keyring, clock);
 
       store.write((db) {
         final audit = AuditLog(db, now: clock);
@@ -253,8 +392,11 @@ final class Engine {
     }
   }
 
+  static Future<FileStore> _files(NodePaths paths, Store store, Keyring keyring, DateTime Function() now) async =>
+    FileStore(store, paths.files, await keyring.derive("lyra/files/v1"), now: now);
+
   static Future<void> _discard(NodePaths paths, KeyVault vault, String instanceId) async {
-    for (final path in [paths.keyring, paths.database, "${paths.database}-wal", "${paths.database}-shm"]) {
+    for (final path in [paths.keyring, paths.database, "${paths.database}-wal", "${paths.database}-shm", paths.transport]) {
       final file = File(path);
       if (file.existsSync()) file.deleteSync();
     }

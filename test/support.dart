@@ -28,15 +28,17 @@ NodePaths tempPaths(void Function(void Function()) addTearDown) {
   return NodePaths(folder.path);
 }
 
-Future<({String instanceId, RecoveryKey recovery})> setUpMaster(
+Future<({String instanceId, RecoveryKey recovery, EnrolledDevice? device})> setUpMaster(
   NodePaths paths,
   KeyVault vault, {
   String? passphrase,
+  DeviceDraft? device,
   DateTime Function()? now,
 }) => Engine.setup(
   paths: paths,
   vault: vault,
   owner: owner,
+  device: device,
   passphrase: passphrase,
   params: fastParams,
   hasher: fastHasher,

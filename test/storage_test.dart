@@ -57,6 +57,26 @@ void main() {
       );
       expect(store.db.select("SELECT count(*) AS n FROM t").first["n"], 0);
     });
+
+    test('a write inside a write joins it: both commit or neither does', () {
+      final store = Store.open(paths.database, key(1));
+      addTearDown(store.close);
+      store.write((db) => db.execute("CREATE TABLE t (v INTEGER)"));
+
+      store.write((db) {
+        db.execute("INSERT INTO t VALUES (1)");
+        store.write((inner) => inner.execute("INSERT INTO t VALUES (2)"));
+      });
+      expect(
+        () => store.write((db) {
+          store.write((inner) => inner.execute("INSERT INTO t VALUES (3)"));
+          throw StateError("the outer rule refused it");
+        }),
+        throwsStateError,
+      );
+
+      expect(store.db.select("SELECT v FROM t ORDER BY v").map((row) => row["v"]), [1, 2]);
+    });
   });
 
   group('key loss', () {

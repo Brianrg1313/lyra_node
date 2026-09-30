@@ -18,6 +18,7 @@ dependencies:
 
 dev_dependencies:
   lints: ^6.1.0
+  multicast_dns: ^0.3.3+1
   test: ^1.31.0
 
 # SQLCipher, never plain SQLite: the database file is encrypted page by page (plan §6.1).

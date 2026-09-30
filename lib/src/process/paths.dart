@@ -42,6 +42,12 @@ final class NodePaths {
   /// Signed stop requests from `lyra_node stop` (`ControlChannel`).
   String get control => p.join(root, "control");
 
+  /// What the LAN server needs while the engine is locked (`Transport`), sealed.
+  String get transport => p.join(root, "transport.json");
+
+  /// Uploaded files, each encrypted (`FileStore`).
+  String get files => p.join(root, "files");
+
   String get logs => p.join(root, "logs");
 
   String get backups => p.join(root, "backups");
