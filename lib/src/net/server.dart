@@ -172,6 +172,7 @@ final class LanServer {
 
   Future<void> _rpc(HttpRequest request) async {
     if (!WebSocketTransformer.isUpgradeRequest(request)) return _plain(request.response, HttpStatus.badRequest);
+    if (!_ownOrigin(request)) return _plain(request.response, HttpStatus.forbidden);
 
     final certificate = request.certificate;
     final fingerprint = certificate == null ? null : Fingerprint.of(certificate.der);
@@ -195,6 +196,7 @@ final class LanServer {
     final desk = _pairing;
 
     if (!WebSocketTransformer.isUpgradeRequest(request)) return _plain(request.response, HttpStatus.badRequest);
+    if (!_ownOrigin(request)) return _plain(request.response, HttpStatus.forbidden);
     if (desk == null) return _plain(request.response, HttpStatus.serviceUnavailable);
 
     final socket = await WebSocketTransformer.upgrade(request);
@@ -220,6 +222,20 @@ final class LanServer {
     } finally {
       await socket.close();
     }
+  }
+
+  /// A page of any other site, open in a browser that trusts the CA, could open a WebSocket to
+  /// the master (cross-site WebSocket hijacking): it gets nothing without the device's key, but
+  /// it isn't let in either. Browsers always send `Origin`; only the master's own web build, at
+  /// the address the browser asked for, may upgrade. Native clients send no `Origin`.
+  bool _ownOrigin(HttpRequest request) {
+    final origin = request.headers.value("origin");
+    if (origin == null) return true;
+
+    final uri = Uri.tryParse(origin);
+    final host = request.headers.host;
+
+    return uri != null && uri.scheme == "https" && host != null && uri.host == host && uri.port == (request.headers.port ?? 443);
   }
 
   /// `GET /f/<id>` and `PUT /f` (`protocol-v1.md` §6), with the session's access token.

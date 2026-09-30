@@ -17,7 +17,7 @@ final class WebBundle {
   static const contentSecurityPolicy =
     "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; "
     "img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; worker-src 'self' blob:; "
-    "frame-ancestors 'none'; base-uri 'none'; form-action 'none'";
+    "frame-ancestors 'none'; base-uri 'self'; form-action 'none'";
 
   static const _types = {
     ".html": "text/html; charset=utf-8",

@@ -3,3 +3,5 @@ tags:
   process:
   # Real multicast on this computer; skipped where 5353 or multicast is unavailable.
   network:
+  # A real Chrome against the app's LAN web build (`LYRA_WEB`); skipped without it.
+  browser:

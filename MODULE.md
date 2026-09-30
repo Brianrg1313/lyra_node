@@ -45,8 +45,8 @@ one writer. Phase 2 built storage, keys, oplog, identities, audit and the proces
 - `lib/src/net/x509.dart` — `X509` (the two roots of the installation CA, server and device certificates), `Certificate`.
 - `lib/src/net/tls.dart` — `LocalAddresses`, `Authority` (CA key and roots in `meta`, issues), `Transport`
   (`transport.json`, sealed with a control-key subkey: what TLS needs while locked).
-- `lib/src/net/server.dart` — `LanServer` (TLS 1.3 only; `/rpc`, `/pair`, `/f`, web bundle; revoked certificates refused
-  before the upgrade; locked mode).
+- `lib/src/net/server.dart` — `LanServer` (TLS 1.3 only; `/rpc`, `/pair`, `/f`, web bundle; revoked certificates and
+  foreign `Origin`s refused before the upgrade; locked mode).
 - `lib/src/net/rpc.dart` — `RpcConnection` (hello first, gates, rate limit, session binding, event stream), `OpRule`,
   `OpCall` (`write` = change + `commandId` answer in one transaction), `Gate`.
 - `lib/src/net/ops.dart` — `opRules`: every op this engine serves, with its gate and permission.
@@ -72,6 +72,8 @@ one writer. Phase 2 built storage, keys, oplog, identities, audit and the proces
   sessions, passphrase mode, browsers, events, files.
 - `test/discovery_test.dart` — mDNS answers (and a live lookup, tag `network`).
 - `test/process_test.dart` — the built executable with the real vault (Windows only, tag `process`).
+- `test/browser_e2e_test.dart` — the app's LAN web build in a headless Chrome over DevTools: pairs by code, key in
+  IndexedDB, signs in, reloads (`device.prove`), revoked (tag `browser`, needs `LYRA_WEB`).
 
 ## Invariants
 

@@ -374,6 +374,45 @@ void main() {
         "signature": base64.encode(EcKeyPair.generate().sign(DeviceProof.message(result.instanceId, challenge))),
       }), ErrorCodes.forbidden);
     });
+
+    test('a page of another site is not let in, to /rpc or /pair', () async {
+      final master = await TestMaster.start();
+      final ca = master.openEngine.authority.pinned.der;
+
+      await expectLater(
+        connectAsBrowser(master.port, ca, origin: "https://evil.example"),
+        throwsA(isA<WebSocketException>().having((error) => error.httpStatusCode, "status", HttpStatus.forbidden)),
+      );
+      await expectLater(
+        connectAsBrowser(master.port, ca, origin: "https://127.0.0.1:${master.port + 1}"),
+        throwsA(isA<WebSocketException>()),
+      );
+
+      final context = SecurityContext(withTrustedRoots: false)
+        ..setTrustedCertificatesBytes(utf8.encode(Pem.encode("CERTIFICATE", ca)));
+      await expectLater(
+        WebSocket.connect(
+          "wss://127.0.0.1:${master.port}/pair",
+          headers: {"origin": "https://evil.example"},
+          customClient: HttpClient(context: context),
+        ),
+        throwsA(isA<WebSocketException>()),
+      );
+    });
+
+    test('a signed-in device gets the browser root: same key, name-constrained', () async {
+      final master = await TestMaster.start();
+      final (client, _) = await master.signIn();
+      final answer = await client.call(Ops.devicesBrowserCa) as Map;
+      final der = base64.decode(answer["certificate"] as String);
+
+      expect(answer["fingerprint"], Fingerprint.of(der));
+      expect(answer["thumbprint"], hasLength(40));
+      expect(answer["port"], master.port);
+      expect(answer["addresses"], isNot(contains("127.0.0.1")));
+      expect(der, master.openEngine.authority.browser.der);
+      expect(der, isNot(master.openEngine.authority.pinned.der));
+    });
   });
 
   group('events', () {

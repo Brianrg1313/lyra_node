@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:crypto/crypto.dart' show sha1;
 import 'package:lyra_protocol/lyra_protocol.dart';
 
 import '../engine.dart';
@@ -28,6 +29,7 @@ final Map<String, OpRule> opRules = {
   Ops.devicesRename.name: const OpRule(_renameDevice, permission: _devicesPermission),
   Ops.devicesRevoke.name: const OpRule(_revokeDevice, permission: _devicesPermission),
   Ops.pairingStart.name: const OpRule(_startPairing, permission: _devicesPermission, masterOnly: true),
+  Ops.devicesBrowserCa.name: const OpRule(_browserCa),
 };
 
 /// `docs/app-areas.json`, area `local_server`.
@@ -56,16 +58,14 @@ Future<Object?> _hello(OpCall call) async {
   final connection = call.connection;
   if (connection.isBrowser && connection.device == null) connection.challenge = Hashes.random(32);
 
-  return {
-    ...HelloAnswer(
-      protocol: protocolVersion,
-      engine: engineVersion,
-      minApp: minAppVersion,
-      instanceId: server.instanceId,
-      state: server.engine == null ? EngineState.locked : EngineState.ready,
-    ).toJson(),
-    if (connection.challenge != null) "challenge": base64.encode(connection.challenge!),
-  };
+  return HelloAnswer(
+    protocol: protocolVersion,
+    engine: engineVersion,
+    minApp: minAppVersion,
+    instanceId: server.instanceId,
+    state: server.engine == null ? EngineState.locked : EngineState.ready,
+    challenge: connection.challenge,
+  ).toJson();
 }
 
 /// `engine.unlock {passphrase}`: passphrase mode, from the master's own app only (plan §6.2).
@@ -213,4 +213,22 @@ Future<Object?> _startPairing(OpCall call) async {
   final server = call.connection.server;
 
   return server.pairing!.open(openedBy: call.session.accountId, transport: server.transport, port: server.port);
+}
+
+/// `devices.browserCa`: the name-constrained root, for a signed-in native device to install in
+/// its computer's trust store or export for another one (plan §5.3). The pinned channel it comes
+/// on already verified it. Installed by hand on another computer, the person compares what the
+/// OS shows: Windows shows the SHA-1 `thumbprint`, other systems the SHA-256 `fingerprint`.
+/// `addresses` and `port` are where a browser then opens the web build.
+Future<Object?> _browserCa(OpCall call) async {
+  final root = call.engine.authority.browser;
+  final server = call.connection.server;
+
+  return {
+    "addresses": server.transport.addresses.where((address) => address != "127.0.0.1" && address != "::1").toList(),
+    "port": server.port,
+    "certificate": base64.encode(root.der),
+    "fingerprint": root.fingerprint,
+    "thumbprint": sha1.convert(root.der).toString(),
+  };
 }

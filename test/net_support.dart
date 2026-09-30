@@ -19,7 +19,7 @@ PairingDevice deviceNamed(String name, {String platform = "windows"}) =>
 final class TestMaster {
   TestMaster._(this.paths, this.vault, this.engine, this.server, this.master, this.controlKey);
 
-  static Future<TestMaster> start({String? passphrase}) async {
+  static Future<TestMaster> start({String? passphrase, String? webRoot}) async {
     final paths = tempPaths(addTearDown);
     final vault = MemoryVault();
     final key = EcKeyPair.generate();
@@ -41,6 +41,7 @@ final class TestMaster {
       transport: transport,
       requestedPort: 0,
       address: InternetAddress.loopbackIPv4,
+      webRoot: webRoot,
       engine: engine,
       unlock: (secret) async {
         try {
@@ -148,10 +149,16 @@ Future<void> expectRefusal(Future<Object?> future, String code) =>
 
 /// A WebSocket to `/rpc` that trusts the CA but presents **no** client certificate: what a
 /// browser with the installed CA looks like to the master.
-Future<RpcClient> connectAsBrowser(int port, List<int> caCertificate) async {
+/// `/rpc` as a browser opens it: no client certificate, and the `Origin` of the page (the
+/// master's own web build unless [origin] says otherwise).
+Future<RpcClient> connectAsBrowser(int port, List<int> caCertificate, {String? origin}) async {
   final context = SecurityContext(withTrustedRoots: false)
     ..setTrustedCertificatesBytes(utf8.encode(Pem.encode("CERTIFICATE", caCertificate)));
-  final socket = await WebSocket.connect("wss://127.0.0.1:$port/rpc", customClient: HttpClient(context: context));
+  final socket = await WebSocket.connect(
+    "wss://127.0.0.1:$port/rpc",
+    headers: {"origin": origin ?? "https://127.0.0.1:$port"},
+    customClient: HttpClient(context: context),
+  );
   final client = RpcClient(_Frames(socket));
   addTearDown(client.close);
 
