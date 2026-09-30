@@ -1,0 +1,29 @@
+name: lyra_node
+description: The Lyra engine. Runs on the master, stores one company encrypted, serves it on the LAN.
+version: 0.1.0
+publish_to: 'none'
+
+environment:
+  sdk: ^3.10.0
+
+dependencies:
+  crypto: ^3.0.7
+  cryptography: ^2.9.0
+  ffi: ^2.2.0
+  lyra_protocol:
+    path: ../lyra_protocol
+  path: ^1.9.1
+  sqlite3: ^3.7.0
+  uuid: ^4.6.0
+
+dev_dependencies:
+  lints: ^6.1.0
+  test: ^1.31.0
+
+# SQLCipher, never plain SQLite: the database file is encrypted page by page (plan §6.1).
+# `Store.open` refuses a library without it, so a wrong define fails loudly instead of writing
+# the company's data in the clear.
+hooks:
+  user_defines:
+    sqlite3:
+      source: sqlcipher

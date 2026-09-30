@@ -1,0 +1,3 @@
+tags:
+  # Builds and runs the real executable (slow; Windows only).
+  process:
