@@ -52,7 +52,7 @@ final class StoredFile {
 /// keyring derives for files, the file id as context), its row in `files`.
 ///
 /// A file nothing references within [orphanAge] is deleted ([sweep]). Until a domain op
-/// references one (phase 4: logos, product images), only its uploader may read it back.
+/// references one ([claim]: a logo, a product image), only its uploader may read it back.
 final class FileStore {
   FileStore(this._store, this._folder, this._key, {DateTime Function()? now}) : _now = now ?? DateTime.now;
 
@@ -111,6 +111,27 @@ final class FileStore {
       bytes: await Envelope.open(_key, file.readAsBytesSync(), context: "lyra/file/$id"),
     );
   }
+
+  /// A record takes [id] (a logo, a product image): from now on whoever holds [permission]
+  /// reads it, and the sweep leaves it alone. Only its [uploader]'s fresh upload of [purpose]
+  /// can be taken; anything else is `invalid_file`. Runs inside the op's write.
+  void claim(String id, FilePurpose purpose, {required String permission, required String uploader}) {
+    final rows = _store.db.select("SELECT * FROM files WHERE id = ?", [id]);
+    final row = rows.isEmpty ? null : rows.first;
+
+    if (row == null || row["purpose"] != purpose.header || row["referenced"] != 0 || row["owner"] != uploader) {
+      throw const EngineFailure("invalid_file");
+    }
+
+    _store.write((db) => db.execute("UPDATE files SET referenced = 1, permission = ? WHERE id = ?", [permission, id]));
+  }
+
+  /// The record let [id] go (a replaced logo): it becomes an orphan again, counted from now, and
+  /// the sweep deletes it.
+  void release(String id) => _store.write((db) => db.execute(
+    "UPDATE files SET referenced = 0, created = ? WHERE id = ?",
+    [_now().toUtc().toIso8601String(), id],
+  ));
 
   /// Deletes uploads nobody referenced within [orphanAge]. Answers how many.
   int sweep() {

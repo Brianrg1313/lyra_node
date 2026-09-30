@@ -6,10 +6,12 @@ import 'package:lyra_protocol/lyra_protocol.dart';
 import '../engine.dart';
 import '../failure.dart';
 import '../identity/devices.dart';
+import '../identity/permissions.dart';
 import 'rpc.dart';
 
-/// Every op this engine serves, with its gate (`protocol-v1.md` §9, `session.md`). An op of the
-/// catalogue missing here answers `unknown_op`: its domain arrives in plan phase 4.
+/// Every op this engine serves, with its gate (`protocol-v1.md` §9, `session.md`, `business.md`).
+/// An op of the catalogue missing here answers `unknown_op`: its domain arrives later in plan
+/// phase 4, one domain per release.
 ///
 /// A new op goes into `protocol-v1.md`, `lyra_protocol` (`Ops`), this table with its gate, and a
 /// test, in the same change (the app's CLAUDE.md, local ops rule).
@@ -30,7 +32,16 @@ final Map<String, OpRule> opRules = {
   Ops.devicesRevoke.name: const OpRule(_revokeDevice, permission: _devicesPermission),
   Ops.pairingStart.name: const OpRule(_startPairing, permission: _devicesPermission, masterOnly: true),
   Ops.devicesBrowserCa.name: const OpRule(_browserCa),
+  Ops.sessionBootstrap.name: const OpRule(_bootstrap),
+  Ops.catalogGet.name: const OpRule(_catalog),
+  Ops.businessProfile.name: const OpRule(_profile, permission: _businessView),
+  Ops.businessEdit.name: const OpRule(_editProfile, permission: "business.settings.edit"),
+  Ops.businessSetLogo.name: const OpRule(_setLogo, permission: "business.settings.edit_logo"),
+  Ops.businessSiteGet.name: const OpRule(_site, permission: _businessView),
+  Ops.businessSiteEdit.name: const OpRule(_editSite, permission: "business.settings.edit"),
 };
+
+const _businessView = "business.view";
 
 /// `docs/app-areas.json`, area `local_server`.
 const _devicesPermission = "local_server.devices";
@@ -232,3 +243,65 @@ Future<Object?> _browserCa(OpCall call) async {
     "thumbprint": sha1.convert(root.der).toString(),
   };
 }
+
+/// `session.bootstrap` (`session.md`): what `/init` answers in the cloud, for this master's one
+/// company (S-30), with no tasks (S-31) and the bundled catalogues (S-32).
+Future<Object?> _bootstrap(OpCall call) async {
+  final engine = call.engine;
+  final business = engine.business;
+
+  return {
+    "client": engine.accounts.card(call.session.accountId),
+    "businesses": [business.summary()],
+    "permissions": {business.id: [...call.connection.grants]..sort()},
+    "tasks": const <Object?>[],
+    "catalogs": {
+      "version": Catalogs.version,
+      Catalogs.countries: Catalogs.countryRows,
+      Catalogs.currencies: Catalogs.currencyRows,
+    },
+    "deployment": {
+      "mode": "local",
+      "instanceId": engine.instanceId,
+      "engine": engineVersion,
+      "timezone": business.timezone,
+    },
+  };
+}
+
+/// `catalog.get {name}` (`business.md`, catalogues): the snapshot this master's release carries.
+Future<Object?> _catalog(OpCall call) async {
+  final name = call.text("name", max: 64);
+  final rows = Catalogs.named(name);
+  if (rows == null) throw const EngineFailure(ErrorCodes.notFound, {"field": "name"});
+
+  return {"version": Catalogs.version, "items": rows};
+}
+
+bool _isOwner(OpCall call) => call.connection.grants.contains(Permissions.all);
+
+Future<Object?> _profile(OpCall call) async => call.engine.business.profile(owner: _isOwner(call));
+
+/// `business.edit {KEY: value}` (B-2): one key per call.
+Future<Object?> _editProfile(OpCall call) async => call.write(() =>
+  call.engine.business.edit(call.args, owner: _isOwner(call), actor: call.session.accountId, device: call.device.id));
+
+/// `business.setLogo {fileId}` (B-8): a `logo` upload of this account, or null to remove it.
+Future<Object?> _setLogo(OpCall call) async {
+  final fileId = call.args["fileId"];
+  if (fileId != null && fileId is! String) throw const EngineFailure(ErrorCodes.invalidField, {"field": "fileId"});
+
+  return call.write(() => call.engine.business.setLogo(
+    fileId as String?,
+    call.engine.files,
+    owner: _isOwner(call),
+    actor: call.session.accountId,
+    device: call.device.id,
+  ));
+}
+
+Future<Object?> _site(OpCall call) async => call.engine.business.site();
+
+/// `business.site.edit {changed keys}` (B-10 to B-12).
+Future<Object?> _editSite(OpCall call) async => call.write(() =>
+  call.engine.business.editSite(call.args, actor: call.session.accountId, device: call.device.id));

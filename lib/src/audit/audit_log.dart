@@ -13,6 +13,7 @@ abstract final class AuditKinds {
   static const keyringRecovered = "keyring.recovered";
   static const migrationApplied = "migration.applied";
   static const accountCreated = "account.created";
+  static const companyCreated = "company.created";
   static const signInFailed = "auth.failed";
   static const accountLocked = "auth.locked";
   static const signedIn = "auth.signed_in";

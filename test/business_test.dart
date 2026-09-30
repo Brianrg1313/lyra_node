@@ -1,0 +1,201 @@
+import 'dart:convert';
+import 'dart:io';
+import 'dart:typed_data';
+
+import 'package:lyra_protocol/lyra_protocol.dart';
+import 'package:test/test.dart';
+import 'package:uuid/uuid.dart';
+
+import 'net_support.dart';
+
+/// The business domain over the LAN (`business.md`, `session.md` session.bootstrap): the one
+/// company and site, their edits and events, the logo, the catalogues. Rule numbers name what
+/// each test checks.
+void main() {
+  late TestMaster master;
+  late RpcClient client;
+  late Map<String, Object?> tokens;
+
+  setUp(() async {
+    master = await TestMaster.start();
+    (client, tokens) = await master.signIn();
+  });
+
+  Future<Object?> write(Op op, Map<String, Object?> args, {String? commandId}) =>
+    client.call(op, args: args, commandId: commandId ?? const Uuid().v7());
+
+  group('session.bootstrap', () {
+    test('answers the one company, the owner\'s grants, the catalogues and the deployment (S-30 to S-33)', () async {
+      final answer = await client.call(Ops.sessionBootstrap) as Map<String, Object?>;
+      final businesses = answer["businesses"] as List;
+      final company = businesses.single as Map;
+
+      expect(company["name"], "Lovelace Café");
+      expect(company["currency"], "USD");
+      expect(answer["permissions"], {company["id"]: ["*"]});
+      expect(answer["tasks"], isEmpty);
+      expect((answer["client"] as Map)["username"], "ada.owner");
+      expect((answer["client"] as Map)["lastName"], "Lovelace");
+      expect(((answer["catalogs"] as Map)["countries"] as List).map((row) => (row as Map)["code"]), contains("VE"));
+      expect(answer["deployment"], containsPair("mode", "local"));
+      // No zone set: the country's (B-9).
+      expect((answer["deployment"] as Map)["timezone"], "America/Caracas");
+    });
+  });
+
+  group('business.company', () {
+    test('an edit writes one key and answers the profile (B-2)', () async {
+      final profile = await write(Ops.businessEdit, {"legalName": "  Lovelace C.A.  "}) as Map;
+
+      expect(profile["legalName"], "Lovelace C.A.");
+      expect(profile["owner"], isTrue);
+      expect(profile["verification"], "untrusted");
+      expect((await client.call(Ops.businessProfile) as Map)["legalName"], "Lovelace C.A.");
+
+      final cleared = await write(Ops.businessEdit, {"legalName": ""}) as Map;
+      expect(cleared["legalName"], isNull);
+    });
+
+    test('the name can\'t be cleared; unknown keys, the currency and two keys at once are refused', () async {
+      await expectRefusal(write(Ops.businessEdit, {"name": " "}), ErrorCodes.required);
+      await expectRefusal(write(Ops.businessEdit, {"currency": "EUR"}), ErrorCodes.invalidField);
+      await expectRefusal(write(Ops.businessEdit, {"owner": "me"}), ErrorCodes.invalidField);
+      await expectRefusal(write(Ops.businessEdit, {"name": "A", "caption": "B"}), ErrorCodes.badRequest);
+      await expectRefusal(write(Ops.businessEdit, {"country": "ZZ"}), ErrorCodes.invalidField);
+      await expectRefusal(write(Ops.businessEdit, {"language": "xx"}), ErrorCodes.invalidField);
+      await expectRefusal(write(Ops.businessEdit, {"activity": "PIRACY"}), ErrorCodes.invalidField);
+      await expectRefusal(write(Ops.businessEdit, {"incorporationDate": "2024-02-30"}), ErrorCodes.invalidField);
+      await expectRefusal(write(Ops.businessEdit, {"timezone": "Caracas"}), "invalid_timezone");
+    });
+
+    test('a zone, a day and a sector are stored as codes', () async {
+      await write(Ops.businessEdit, {"timezone": "America/Bogota"});
+      await write(Ops.businessEdit, {"incorporationDate": "2020-02-29"});
+      final profile = await write(Ops.businessEdit, {"activity": "food"}) as Map;
+
+      expect(profile["timezone"], "America/Bogota");
+      expect(profile["incorporationDate"], "2020-02-29");
+      expect(profile["activity"], "FOOD");
+      expect(((await client.call(Ops.sessionBootstrap) as Map)["deployment"] as Map)["timezone"], "America/Bogota");
+    });
+
+    test('the same commandId again answers the first result and writes nothing twice', () async {
+      final commandId = const Uuid().v7();
+      final first = await write(Ops.businessEdit, {"caption": "Coffee"}, commandId: commandId);
+      await write(Ops.businessEdit, {"caption": "Tea"});
+
+      expect(await write(Ops.businessEdit, {"caption": "Coffee"}, commandId: commandId), first);
+      expect((await client.call(Ops.businessProfile) as Map)["caption"], "Tea");
+      await expectRefusal(write(Ops.businessEdit, {"caption": "Other"}, commandId: commandId), ErrorCodes.commandReused);
+    });
+
+    test('a change reaches subscribers as business/changed with its keys', () async {
+      final events = <RpcEvent>[];
+      final subscription = client.events.listen(events.add);
+      addTearDown(subscription.cancel);
+      await client.call(Ops.eventsSubscribe);
+
+      await write(Ops.businessEdit, {"phone": "+58 212 555 0101"});
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+
+      expect(events.single.event, Events.businessChanged);
+      expect(events.single.data, {"keys": ["phone"]});
+    });
+
+    test('without the permission the master refuses, whatever the app shows', () async {
+      final engine = master.openEngine;
+      final owner = tokens["accountId"] as String;
+
+      engine.store.write((db) {
+        db.execute("DELETE FROM grants WHERE account = ?", [owner]);
+        db.execute("INSERT INTO grants (account, permission) VALUES (?, 'business.view')", [owner]);
+      });
+      final (reader, _) = await master.signIn();
+
+      expect(await reader.call(Ops.businessProfile), isA<Map>());
+      await expectRefusal(
+        reader.call(Ops.businessEdit, args: {"caption": "x"}, commandId: const Uuid().v7()),
+        ErrorCodes.forbidden,
+      );
+      await expectRefusal(
+        reader.call(Ops.businessSiteEdit, args: {"city": "x"}, commandId: const Uuid().v7()),
+        ErrorCodes.forbidden,
+      );
+    });
+  });
+
+  group('business.site', () {
+    test('only the changed keys are written, and null clears (B-10)', () async {
+      await write(Ops.businessSiteEdit, {"address": "Av. Principal", "city": "Caracas", "postalCode": "1010"});
+      final site = await write(Ops.businessSiteEdit, {"city": null}) as Map;
+
+      expect(site["address"], "Av. Principal");
+      expect(site["city"], isNull);
+      expect(site["postalCode"], "1010");
+      expect(site["main"], isTrue);
+      expect(site["country"], "VE");
+    });
+
+    test('a point is both halves at 6 decimals, in range, or nothing (B-11)', () async {
+      final site = await write(Ops.businessSiteEdit, {"latitude": 10.4880634, "longitude": -66.8791937}) as Map;
+
+      expect(site["latitude"], 10.488063);
+      expect(site["longitude"], -66.879194);
+
+      await expectRefusal(write(Ops.businessSiteEdit, {"latitude": 10.5}), "invalid_point");
+      await expectRefusal(write(Ops.businessSiteEdit, {"latitude": 10.5, "longitude": null}), "invalid_point");
+      await expectRefusal(write(Ops.businessSiteEdit, {"latitude": 91, "longitude": 0}), "invalid_point");
+
+      final cleared = await write(Ops.businessSiteEdit, {"latitude": null, "longitude": null}) as Map;
+      expect(cleared["latitude"], isNull);
+    });
+
+    test('the country of a location write is the company\'s (B-12)', () async {
+      final site = await write(Ops.businessSiteEdit, {"country": "co"}) as Map;
+
+      expect(site["country"], "CO");
+      expect((await client.call(Ops.businessProfile) as Map)["country"], "CO");
+    });
+  });
+
+  group('logo', () {
+    Future<String> upload(String purpose) async {
+      final http = HttpClient(context: master.master.context);
+      addTearDown(() => http.close(force: true));
+      final request = await http.openUrl("PUT", Uri.parse("https://127.0.0.1:${master.port}/f"));
+      request.headers.set(HttpHeaders.authorizationHeader, "Bearer ${tokens["accessToken"]}");
+      request.headers.set("X-Lyra-Purpose", purpose);
+      request.add(Uint8List.fromList([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]));
+
+      return (jsonDecode(await utf8.decodeStream(await request.close())) as Map)["fileId"] as String;
+    }
+
+    test('a logo upload becomes the logo; the one it replaces is let go (B-8)', () async {
+      final first = await upload("logo");
+      expect((await write(Ops.businessSetLogo, {"fileId": first}) as Map)["logo"], first);
+
+      final second = await upload("logo");
+      await write(Ops.businessSetLogo, {"fileId": second});
+
+      final rows = master.openEngine.store.db.select("SELECT id, referenced, permission FROM files ORDER BY id");
+      expect({for (final row in rows) row["id"]: row["referenced"]}, {first: 0, second: 1});
+      expect(rows.last["permission"], "business.view");
+      expect((await write(Ops.businessSetLogo, {"fileId": null}) as Map)["logo"], isNull);
+    });
+
+    test('an upload for something else, or an unknown id, is not a logo', () async {
+      await expectRefusal(write(Ops.businessSetLogo, {"fileId": await upload("picture")}), "invalid_file");
+      await expectRefusal(write(Ops.businessSetLogo, {"fileId": "0192f0aa-0000-7000-8000-000000000000"}), "invalid_file");
+    });
+  });
+
+  group('catalog.get', () {
+    test('answers the bundled snapshot with its version (B-20, B-21)', () async {
+      final answer = await client.call(Ops.catalogGet, args: {"name": "currencies"}) as Map;
+
+      expect(answer["version"], Catalogs.version);
+      expect((answer["items"] as List).map((row) => (row as Map)["code"]), containsAll(["USD", "VES", "BTC"]));
+      await expectRefusal(client.call(Ops.catalogGet, args: {"name": "money.rails"}), ErrorCodes.notFound);
+    });
+  });
+}

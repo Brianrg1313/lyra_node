@@ -9,6 +9,7 @@ import 'crypto/keyring.dart';
 import 'crypto/recovery.dart';
 import 'crypto/secrets.dart';
 import 'crypto/vault.dart';
+import 'domain/business/business.dart';
 import 'failure.dart';
 import 'identity/accounts.dart';
 import 'identity/devices.dart';
@@ -130,6 +131,8 @@ final class Engine {
 
   late final Accounts accounts = Accounts(store, clock, hasher: _hasher, now: _now);
 
+  late final Business business = Business(store, clock, now: _now);
+
   Devices get devices => Devices(store, clock, now: _now);
 
   /// Sessions hold access tokens in memory: one instance for the engine's life.
@@ -215,7 +218,8 @@ final class Engine {
     return fresh;
   }
 
-  /// Makes a new master in [paths]: the keys, the database and its owner (plan §6.2, §7.4).
+  /// Makes a new master in [paths]: the keys, the database, its owner and its company (plan §6.2,
+  /// §7.4, `business.md` B-1).
   ///
   /// [passphrase] chooses passphrase mode. Answers the recovery key, **the only time it exists
   /// outside the owner's hands**. If anything fails, whatever was already written is removed,
@@ -224,6 +228,7 @@ final class Engine {
     required NodePaths paths,
     required KeyVault vault,
     required OwnerDraft owner,
+    required CompanyDraft company,
     DeviceDraft? device,
     String? passphrase,
     Argon2Params params = Argon2Params.standard,
@@ -236,6 +241,9 @@ final class Engine {
     // A database with no keyring is data nobody can open, but it may still be somebody's only
     // copy to hand to support; it is never overwritten.
     if (File(paths.database).existsSync()) throw const EngineFailure("data_exists");
+
+    // Before any key or file exists: a wrong field leaves nothing to clean up.
+    company.check();
 
     final instanceId = newId();
     final clock = now ?? DateTime.now;
@@ -265,13 +273,14 @@ final class Engine {
         }
       });
 
-      await Accounts(store, hlc, hasher: hasher, now: clock).createOwner(
+      final account = await Accounts(store, hlc, hasher: hasher, now: clock).createOwner(
         username: owner.username,
         password: owner.password,
         firstName: owner.firstName,
         lastName: owner.lastName,
         email: owner.email,
       );
+      store.write((db) => Business.create(db, company, clock: hlc, now: clock(), actor: account.id));
 
       // The CA, the server certificate and the master's own device, so the first start already
       // serves the LAN (plan §5.3).

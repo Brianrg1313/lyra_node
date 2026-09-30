@@ -14,6 +14,8 @@ const owner = OwnerDraft(
   lastName: "Lovelace",
 );
 
+const company = CompanyDraft(name: "Lovelace Café", country: "VE", currency: "USD", language: "es");
+
 /// A fresh data folder, removed after the test.
 NodePaths tempPaths(void Function(void Function()) addTearDown) {
   final folder = Directory.systemTemp.createTempSync("lyra_node_test_");
@@ -38,6 +40,7 @@ Future<({String instanceId, RecoveryKey recovery, EnrolledDevice? device})> setU
   paths: paths,
   vault: vault,
   owner: owner,
+  company: company,
   device: device,
   passphrase: passphrase,
   params: fastParams,

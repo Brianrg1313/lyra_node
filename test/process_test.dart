@@ -72,6 +72,7 @@ void main() {
   Future<void> setUpMasterCli({String? passphrase}) async {
     final answer = await cli(["setup"], input: jsonEncode({
       "owner": {"username": "owner", "password": "correct horse battery", "firstName": "Ada", "lastName": "L"},
+      "company": _company,
       "passphrase": ?passphrase,
     }));
 
@@ -131,6 +132,7 @@ void main() {
     final device = {"name": "Server", "platform": "windows", "appVersion": "0.0.7", "publicKey": base64.encode(key.spki)};
     final setup = await cli(["setup"], input: jsonEncode({
       "owner": {"username": "owner", "password": "correct horse battery", "firstName": "Ada", "lastName": "L"},
+      "company": _company,
       "device": device,
     }));
     final enrolled = setup["device"] as Map<String, Object?>;
@@ -174,3 +176,5 @@ void main() {
     expect(again["error"], "already_set_up");
   });
 }
+
+const _company = {"name": "Lovelace Café", "country": "VE", "currency": "USD", "language": "es"};

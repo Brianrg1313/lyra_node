@@ -3,7 +3,7 @@
 **Path** `E:/andromeda/frontend/packages/lyra_node` (own git repo, pure Dart, no Flutter)
 **Role** The engine that runs on the master (`lyra/app/docs/plan-offline-lan.md` §3, §8): one company, encrypted,
 one writer. Phase 2 built storage, keys, oplog, identities, audit and the process lifecycle; phase 3 the LAN server
-(TLS, pairing, RPC, events, files, mDNS); the domains are phase 4. Rules come from `lyra/app/docs/offline/specs/*`, never from backend code (plan principle 1).
+(TLS, pairing, RPC, events, files, mDNS); phase 4 adds the domains one per release (business so far). Rules come from `lyra/app/docs/offline/specs/*`, never from backend code (plan principle 1).
 **Used by** `lyra/app` through the executable only (`LocalServerService`), never as a Dart import.
 
 ## Files
@@ -11,8 +11,9 @@ one writer. Phase 2 built storage, keys, oplog, identities, audit and the proces
 - `bin/lyra_node.dart` — the executable: `setup`, `run`, `status`, `stop`, `recover`, `enroll`, `version`; one JSON
   line out, secrets only on stdin. Table of commands in its `///`.
 - `lib/lyra_node.dart` — barrel (for `bin/` and tests).
-- `lib/src/engine.dart` — `Engine` (`setup`, `open`, `recover`, `close`, `controlKey`, `enrollMaster`,
-  `prepareTransport`; holds `sessions`, `events`, `authority`, `files`), `OwnerDraft`, `DeviceDraft`, `EnrolledDevice`,
+- `lib/src/engine.dart` — `Engine` (`setup` with the owner and the company, `open`, `recover`, `close`, `controlKey`,
+  `enrollMaster`, `prepareTransport`; holds `sessions`, `events`, `authority`, `files`, `business`), `OwnerDraft`,
+  `DeviceDraft`, `EnrolledDevice`,
   `engineVersion`, `minAppVersion`.
 - `lib/src/failure.dart` — `EngineFailure` (a rule's refusal: stable `code` + `data`, no message).
 - `lib/src/ids.dart` — `newId()` (UUIDv7).
@@ -30,13 +31,16 @@ one writer. Phase 2 built storage, keys, oplog, identities, audit and the proces
   `DatabaseTooNew`.
 - `lib/src/storage/migrations/m001_core.dart` — `meta`, `oplog`, `commands`, `audit`, `accounts`, `grants`.
 - `lib/src/storage/migrations/m002_network.dart` — `devices`, `sessions`, `refresh_spent`, `events`, `files`.
+- `lib/src/storage/migrations/m003_business.dart` — `company`, `site` (one row each; the point in millionths).
+- `lib/src/domain/business/business.dart` — `CompanyDraft` (setup, checked before anything is written), `Business`
+  (`create`, `profile`, `summary`, `edit` one key, `setLogo`, `site`, `editSite`, `timezone`): `business.md`.
 - `lib/src/oplog/hlc.dart` — `Hlc` (packed, sortable), `HlcClock` (never backwards, `maxDrift`), `ClockDrift`.
 - `lib/src/oplog/oplog.dart` — `Oplog` (`append` inside the write, `since`, `lastSeq`, `lastHlc`), `OplogEntry`.
 - `lib/src/oplog/commands.dart` — `CommandLedger` (`commandId` idempotence, 30 days), `CommandReused`.
 - `lib/src/audit/audit_log.dart` — `AuditLog` (hash-chained, `append`, `verify`, `list`), `AuditEntry`, `AuditKinds`.
 - `lib/src/identity/passwords.dart` — `PasswordHasher` (Argon2id PHC strings, `needsRehash`).
-- `lib/src/identity/accounts.dart` — `Accounts` (`createOwner`, `verifyPassword` with lockout, `newPasswordHash` +
-  `setPassword`, `usesPassword`), `Account`, `AccountStatus`.
+- `lib/src/identity/accounts.dart` — `Accounts` (`createOwner`, `card` (the bootstrap's person), `verifyPassword` with
+  lockout, `newPasswordHash` + `setPassword`, `usesPassword`), `Account`, `AccountStatus`.
 - `lib/src/identity/devices.dart` — `Devices` (`enroll`, `rename`, `revoke`, `touch`, `byFingerprint`, `master`, `codeFor`),
   `Device`, `DeviceKind` (`master`, `native`, `web`).
 - `lib/src/identity/sessions.dart` — `Sessions` (access tokens in memory, rotated refresh tokens, reuse ends the session),
@@ -53,7 +57,8 @@ one writer. Phase 2 built storage, keys, oplog, identities, audit and the proces
 - `lib/src/net/pairing.dart` — `PairingDesk` (the live ticket, SPAKE2 master side, 3 failures void it).
 - `lib/src/net/events.dart` — `EventLog` (append inside a write, `publish` after, replay window, `resync_required`),
   `StoredEvent`.
-- `lib/src/net/files.dart` — `FileStore` (sealed uploads, type sniffing, orphan sweep), `FilePurpose`.
+- `lib/src/net/files.dart` — `FileStore` (sealed uploads, type sniffing, `claim` / `release` by a record, orphan sweep),
+  `FilePurpose`.
 - `lib/src/net/messages.dart` — `Messages` (refusal code → `RpcError` with message and action).
 - `lib/src/net/web_bundle.dart` — `WebBundle` (static web build, CSP).
 - `lib/src/net/discovery.dart` — `MdnsResponder` (`_lyra._tcp.local`).
@@ -70,6 +75,8 @@ one writer. Phase 2 built storage, keys, oplog, identities, audit and the proces
 - `test/crypto_test.dart`, `keyring_test.dart`, `storage_test.dart`, `oplog_test.dart`, `engine_test.dart` — units.
 - `test/net_test.dart` — the LAN server with real TLS clients: handshake, pairing, man in the middle, revocation,
   sessions, passphrase mode, browsers, events, files.
+- `test/business_test.dart` — the business domain over the LAN: bootstrap, profile edits and their refusals, idempotence,
+  `business/changed`, permissions, the site's point, the logo, `catalog.get` (rule numbers in the names).
 - `test/discovery_test.dart` — mDNS answers (and a live lookup, tag `network`).
 - `test/process_test.dart` — the built executable with the real vault (Windows only, tag `process`).
 - `test/browser_e2e_test.dart` — the app's LAN web build in a headless Chrome over DevTools: pairs by code, key in

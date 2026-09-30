@@ -23,7 +23,7 @@ void main() {
   final web = Platform.environment["LYRA_WEB"];
   final chrome = Platform.environment["CHROME"] ?? r"C:\Program Files\Google\Chrome\Application\chrome.exe";
 
-  test('a browser pairs by code, signs in, and proves itself again after a reload', () async {
+  test('a browser pairs by code, signs in, opens the company, and proves itself again after a reload', () async {
     final master = await TestMaster.start(webRoot: web);
     final pin = base64.encode(Hashes.sha256(EcKeyPair.fromPem(master.server.transport.serverKeyPem).spki));
     final browser = await Browser.launch(chrome, pin: pin);
@@ -58,13 +58,15 @@ void main() {
     await browser.click(480, 348);
     await browser.insert(owner.password);
     await browser.click(503, 408);
-    await browser.waitFor("Connected to the server");
+    // Signed in, the app reads the master's bootstrap and opens the home: the company is in its
+    // header (the business release of plan phase 4).
+    await browser.waitFor(company.name);
 
     // A new page load is a new connection: the browser proves itself with the kept key and
     // picks up its session.
     await browser.send("Page.reload");
     await browser.waitForView();
-    await browser.waitFor("Connected to the server");
+    await browser.waitFor(company.name);
 
     final (admin, _) = await master.signIn();
     final paired = master.openEngine.devices.list().firstWhere((device) => device.name == "Lyra Web");

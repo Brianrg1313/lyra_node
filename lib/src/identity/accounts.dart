@@ -136,6 +136,25 @@ final class Accounts {
     return rows.isEmpty ? null : _account(rows.first);
   }
 
+  /// The person as the bootstrap's `client` shows them (`session.md` session.bootstrap).
+  Map<String, Object?> card(String id) {
+    final rows = _db.select("SELECT * FROM accounts WHERE id = ? AND deleted = 0", [id]);
+    if (rows.isEmpty) throw const EngineFailure(ErrorCodes.notFound);
+
+    final row = rows.first;
+
+    return {
+      "id": row["id"],
+      "name": row["first_name"],
+      "lastName": row["last_name"],
+      "username": row["username"],
+      "email": row["email"],
+      "sex": row["sex"],
+      "picture": row["picture"],
+      "birthday": row["birthday"],
+    };
+  }
+
   /// Checks a sign in by username or e-mail (`session.md` S-4).
   ///
   /// Every refusal of a wrong login or password is `invalid_credentials`, and an unknown login

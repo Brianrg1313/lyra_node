@@ -35,6 +35,8 @@ abstract final class Messages {
     "not_master": "Only the server computer can do that.",
     "self": "The server's own device can't be removed.",
     "invalid_file": "The file is not a type or size that can be used here.",
+    "invalid_point": "The location needs both a valid latitude and a valid longitude.",
+    "invalid_timezone": "That time zone doesn't exist.",
   };
 
   /// Codes whose client must go somewhere (`ErrorActions`).

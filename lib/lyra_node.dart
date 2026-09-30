@@ -9,6 +9,7 @@ export 'src/crypto/keyring.dart';
 export 'src/crypto/recovery.dart';
 export 'src/crypto/secrets.dart' show Argon2Params;
 export 'src/crypto/vault.dart';
+export 'src/domain/business/business.dart';
 export 'src/engine.dart';
 export 'src/failure.dart';
 export 'src/identity/accounts.dart';

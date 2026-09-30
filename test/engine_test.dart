@@ -44,10 +44,14 @@ void main() {
         AuditKinds.keyringCreated,
         for (final _ in migrations) AuditKinds.migrationApplied,
         AuditKinds.accountCreated,
+        AuditKinds.companyCreated,
         AuditKinds.engineStart,
       ]);
       expect(engine.audit.verify(), isNull);
-      expect(engine.oplog.since(0).single.payload, isNot(contains("password")));
+      expect(engine.oplog.since(0).map((entry) => entry.entity), ["account", "company"]);
+      expect(engine.oplog.since(0).first.payload, isNot(contains("password")));
+      expect(engine.business.profile(owner: true), containsPair("name", "Lovelace Café"));
+      expect(engine.business.site(), containsPair("name", "Lovelace Café"));
     });
 
     test('a refused owner leaves nothing behind, so a second try starts clean', () async {
@@ -56,6 +60,7 @@ void main() {
           paths: paths,
           vault: vault,
           owner: const OwnerDraft(username: "ada", password: "short", firstName: "Ada", lastName: "L"),
+          company: company,
           params: fastParams,
           hasher: fastHasher,
         ),
@@ -66,6 +71,20 @@ void main() {
       expect(File(paths.database).existsSync(), isFalse);
 
       await setUpMaster(paths, vault);
+    });
+
+    test('a company in a country or currency the catalogue lacks is refused before anything is written', () async {
+      for (final (draft, field) in [
+        (const CompanyDraft(name: "X", country: "ZZ", currency: "USD", language: "es"), "country"),
+        (const CompanyDraft(name: "X", country: "VE", currency: "XXX", language: "es"), "currency"),
+        (const CompanyDraft(name: " ", country: "VE", currency: "USD", language: "es"), "name"),
+      ]) {
+        await expectLater(
+          Engine.setup(paths: paths, vault: vault, owner: owner, company: draft, params: fastParams, hasher: fastHasher),
+          throwsA(isA<EngineFailure>().having((e) => e.data["field"], "field", field)),
+        );
+        expect(File(paths.keyring).existsSync(), isFalse);
+      }
     });
 
     test('is refused over an existing master or orphan data', () async {
