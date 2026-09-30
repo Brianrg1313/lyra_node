@@ -117,15 +117,17 @@ final class NodeRunner {
         // A new address or an old certificate: issued again now that the CA is readable. The
         // listening socket keeps the one it started with until the next start.
         server?.transport = await opened.prepareTransport(controlKey);
-        publish(EnginePhase.ready);
-        log.info("engine ready");
 
         return opened;
       }
 
       Future<Engine> unlock(String secret) async {
         try {
-          return engine = await open(secret);
+          engine = await open(secret);
+          publish(EnginePhase.ready);
+          log.info("engine ready");
+
+          return engine!;
         } on KeyringError catch (error) {
           log.error("unlock failed: ${error.failure.name}");
           throw EngineFailure(error.failure == KeyringFailure.wrongPassphrase ? "wrong_passphrase" : "locked");
@@ -172,6 +174,12 @@ final class NodeRunner {
         }
       } else {
         log.error("no transport file: the LAN starts after the first unlocked start");
+      }
+
+      // `ready` only once the port is known: the app reads both from one state file.
+      if (engine != null) {
+        publish(EnginePhase.ready);
+        log.info("engine ready");
       }
 
       if (keyrings.mode == UnlockMode.passphrase && engine == null) {
