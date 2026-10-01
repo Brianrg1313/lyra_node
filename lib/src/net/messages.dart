@@ -48,6 +48,9 @@ abstract final class Messages {
     "invalid_reason": "That reason doesn't go with this movement.",
     "insufficient_stock": "There isn't enough stock for that.",
     "no_primary_table": "There is no main table yet.",
+    "unsupported_file": "That file can't be read: import an .xlsx or a .csv.",
+    "too_large": "The file is too big: up to 50,000 rows and 250 columns.",
+    "empty_file": "The file has no header row to build the table from.",
   };
 
   /// Codes whose client must go somewhere (`ErrorActions`).

@@ -11,6 +11,10 @@ import '../../oplog/hlc.dart';
 import '../../oplog/oplog.dart';
 import '../../storage/store.dart';
 import 'cells.dart';
+import 'spreadsheet.dart';
+import 'typing.dart';
+
+part 'importing.dart';
 
 /// Product tables, their fields and records, and the records' images (`inventory.md`).
 ///
@@ -551,13 +555,15 @@ final class Inventory {
     List<String> options = const [],
     String unit = "",
     bool summary = false,
+    bool handTyped = true,
   }) {
     final id = newId();
 
     db.execute(
-      "INSERT INTO inventory_fields (id, table_id, name, description, type, position, options, unit, summary, created, updated, created_hlc, updated_hlc) "
-      "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-      [id, tableId, name, description, type, position, jsonEncode(options), unit, summary ? 1 : 0, _stamp, _stamp, stamp.pack(), stamp.pack()],
+      "INSERT INTO inventory_fields (id, table_id, name, description, type, position, options, unit, summary, hand_typed, "
+      "created, updated, created_hlc, updated_hlc) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      [id, tableId, name, description, type, position, jsonEncode(options), unit, summary ? 1 : 0, handTyped ? 1 : 0,
+        _stamp, _stamp, stamp.pack(), stamp.pack()],
     );
 
     return id;
@@ -648,11 +654,7 @@ final class Inventory {
       if (field == null) throw EngineFailure(ErrorCodes.invalidField, {"field": entry.key});
 
       final type = field["type"] as String;
-      final unit = field["unit"] as String;
-      final places = FieldTypes.withUnit.contains(type) && Catalogs.hasCurrency(unit)
-        ? Catalogs.currencyRows.firstWhere((row) => row["code"] == unit)["decimals"] as int
-        : decimals;
-      final value = Cells.check(type, entry.value, field: entry.key, decimals: places);
+      final value = Cells.check(type, entry.value, field: entry.key, decimals: InventoryImport._places(field, decimals));
 
       if (type == FieldTypes.sku && value != null) _uniqueSku(tableId, entry.key, value as String, except: except);
 

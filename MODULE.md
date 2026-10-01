@@ -17,7 +17,7 @@ one writer. Phase 2 built storage, keys, oplog, identities, audit and the proces
   `DeviceDraft`, `EnrolledDevice`,
   `engineVersion`, `minAppVersion`.
 - `lib/src/failure.dart` — `EngineFailure` (a rule's refusal: stable `code` + `data`, no message).
-- `lib/src/ids.dart` — `newId()` (UUIDv7).
+- `lib/src/ids.dart` — `newId()` (UUIDv7, monotonic within the engine: same-millisecond ids keep their order).
 - `lib/src/crypto/secrets.dart` — `randomBytes`, `wipe`, `constantTimeEquals`, `Argon2Params`, `argon2id`, `subkey` (HKDF).
 - `lib/src/crypto/envelope.dart` — `Envelope` (AES-256-GCM, version byte, context as AAD), `EnvelopeError`.
 - `lib/src/crypto/keyring.dart` — `KeyringStore` (`keyring.json`: DEK wrapped by KEK and by the recovery key; `create`,
@@ -41,6 +41,12 @@ one writer. Phase 2 built storage, keys, oplog, identities, audit and the proces
 - `lib/src/domain/inventory/inventory.dart` — `Inventory`: tables (templates, primary flag), fields (dense positions,
   re-typing, width alone), records (checked cells, SKU, counter, text search), images; reads for the ledger
   (`product`, `primaryTable`): `inventory.md`.
+- `lib/src/domain/inventory/importing.dart` — part of `inventory.dart`: `InventoryImport` (`importStructure` with its
+  `table/normalizing` and `table/ready`, `importRecords` answering the opening balances, `normalize`; I-40 to I-47).
+- `lib/src/domain/inventory/spreadsheet.dart` — `Sheet` (`read` off the isolate: header row, names, limits), `Csv`
+  (encodings, separator, quotes), `Xlsx` (first sheet by events: shared/inline strings, date styles).
+- `lib/src/domain/inventory/typing.dart` — `Typing` (I-43: header keywords, value rules, one title/stock; `cell`
+  reads a value as a type with the language's number and date marks; `units`, `gtin`).
 - `lib/src/domain/inventory/cells.dart` — `Cells` (what a cell stores per field type, I-21; `read` for re-typing).
 - `lib/src/domain/stock/stock.dart` — `Stock` (`move` with the projection and manual holds, `balanceOf`, `history`,
   `summary`, `rebuild`): `stock.md`.
@@ -68,7 +74,8 @@ one writer. Phase 2 built storage, keys, oplog, identities, audit and the proces
 - `lib/src/net/events.dart` — `EventLog` (append inside a write, `publish` after, replay window, `resync_required`),
   `StoredEvent`.
 - `lib/src/net/files.dart` — `FileStore` (sealed uploads, type sniffing, a sealed 320 px thumbnail of each image made off
-  the isolate, `get` with `size`, `claim` / `release` by a record, orphan sweep), `FilePurpose`.
+  the isolate, `get` with `size`, `claim` / `release` by a record, `once` / `discard` for an import, orphan sweep),
+  `FilePurpose`.
 - `lib/src/net/messages.dart` — `Messages` (refusal code → `RpcError` with message and action).
 - `lib/src/net/web_bundle.dart` — `WebBundle` (static web build, CSP).
 - `lib/src/net/discovery.dart` — `MdnsResponder` (`_lyra._tcp.local`).
@@ -89,6 +96,8 @@ one writer. Phase 2 built storage, keys, oplog, identities, audit and the proces
   `business/changed`, permissions, the site's point, the logo, `catalog.get` (rule numbers in the names).
 - `test/inventory_test.dart` — inventory and stock over the LAN: tables, templates and the primary flag, fields and
   positions, cells and SKUs, search, images and thumbnails, movements, holds, replays, events, history, summary.
+- `test/import_test.dart` — importing: `.csv` / `.xlsx` reading, the typing rules, both steps over the LAN with their
+  events and opening balances, normalizing, limits.
 - `test/discovery_test.dart` — mDNS answers (and a live lookup, tag `network`).
 - `test/process_test.dart` — the built executable with the real vault (Windows only, tag `process`).
 - `test/browser_e2e_test.dart` — the app's LAN web build in a headless Chrome over DevTools: pairs by code, key in

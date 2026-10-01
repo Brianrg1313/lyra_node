@@ -33,6 +33,9 @@ final class Stock {
   /// `stock.move` (ST-10 to ST-16): one movement, the balance after it. Online in the LAN a
   /// counter never goes negative (ST-13); a POS outbox replay (`source: outbox`) is accepted
   /// anyway and flags the product (ST-14).
+  ///
+  /// Without [announce] no `stock/changed` is emitted: an import's opening balances (I-44) are
+  /// thousands of movements that one `table/changed` already tells about.
   Map<String, Object?> move({
     required String operation,
     required String tableId,
@@ -45,6 +48,7 @@ final class Stock {
     String? actor,
     String? device,
     String? commandId,
+    bool announce = true,
   }) {
     final reasons = StockOperations.reasons[operation];
     if (reasons == null) throw const EngineFailure(ErrorCodes.invalidField, {"field": "operation"});
@@ -123,13 +127,15 @@ final class Stock {
         "product": productId, "table": tableId, "operation": operation, "reason": why, "quantity": quantity,
         "source": source,
       }, actor: actor, device: device);
-      EventLog.append(db, Events.stockChanged, {
-        "productId": productId,
-        "table": tableId,
-        "onHand": onHand,
-        "reserved": reserved,
-        "available": onHand - reserved,
-      }, at: _now(), permission: viewPermission);
+      if (announce) {
+        EventLog.append(db, Events.stockChanged, {
+          "productId": productId,
+          "table": tableId,
+          "onHand": onHand,
+          "reserved": reserved,
+          "available": onHand - reserved,
+        }, at: _now(), permission: viewPermission);
+      }
 
       return _answer(onHand, reserved, returns, review == 1);
     });

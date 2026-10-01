@@ -8,6 +8,9 @@ import '../failure.dart';
 import '../identity/devices.dart';
 import '../identity/permissions.dart';
 import '../audit/audit_log.dart';
+import '../domain/inventory/inventory.dart';
+import '../domain/inventory/spreadsheet.dart';
+import 'files.dart';
 import 'rpc.dart';
 
 /// Every op this engine serves, with its gate (`protocol-v1.md` §9, `session.md`, `business.md`).
@@ -56,6 +59,9 @@ final Map<String, OpRule> opRules = {
   Ops.inventoryRecordsDelete.name: const OpRule(_deleteRecord, permission: _editRecords),
   Ops.inventoryImagesAdd.name: const OpRule(_addImage, permission: _editRecords),
   Ops.inventoryImagesRemove.name: const OpRule(_removeImage, permission: _editRecords),
+  Ops.inventoryImportStructure.name: const OpRule(_importStructure, permission: "inventory.import"),
+  Ops.inventoryImportRecords.name: const OpRule(_importRecords, permission: "inventory.import"),
+  Ops.inventoryTablesNormalize.name: const OpRule(_normalize, permission: _editColumns),
   Ops.stockMove.name: const OpRule(_move, permission: "inventory.move_stock"),
   Ops.stockHistory.name: const OpRule(_history, permission: _inventoryView),
   Ops.stockSummary.name: const OpRule(_summary, permission: _inventoryView),
@@ -411,6 +417,66 @@ Future<Object?> _addImage(OpCall call) async => call.write(() => call.engine.inv
 Future<Object?> _removeImage(OpCall call) async => call.write(() => call.engine.inventory.removeImage(
   call.text("tableId"), call.text("productId"), call.text("fileId", max: 2048), call.engine.files,
   actor: call.session.accountId, device: call.device.id,
+));
+
+/// `inventory.import.structure {fileId, format, name?, row}` (I-40 to I-45): the upload is read
+/// once, off the server's isolate, then deleted.
+Future<Object?> _importStructure(OpCall call) async {
+  final (fileId, sheet) = await _sheet(call);
+  final name = call.args["name"] == null ? null : call.text("name", max: 200);
+  final answer = call.write(() => call.engine.inventory.importStructure(sheet,
+    name: name, actor: call.session.accountId, device: call.device.id));
+
+  call.engine.files.discard(fileId);
+  return answer;
+}
+
+/// `inventory.import.records {fileId, format, tableId, row}` (I-44 to I-46): the rows, and a
+/// stock column's opening balances as `add` / `restock` movements noted "import", in the same
+/// write.
+Future<Object?> _importRecords(OpCall call) async {
+  final tableId = call.text("tableId");
+  final (fileId, sheet) = await _sheet(call);
+  final engine = call.engine;
+  final answer = call.write(() {
+    final result = engine.inventory.importRecords(tableId, sheet,
+      decimals: _decimals(call), actor: call.session.accountId, device: call.device.id);
+
+    for (final (productId, units) in result.opening) {
+      engine.stock.move(
+        operation: StockOperations.add,
+        tableId: tableId,
+        productId: productId,
+        quantity: units,
+        reason: "restock",
+        note: "import",
+        source: "import",
+        actor: call.session.accountId,
+        device: call.device.id,
+        announce: false,
+      );
+    }
+
+    return {"imported": result.imported, "withInvalidCells": result.withInvalidCells};
+  });
+
+  engine.files.discard(fileId);
+  return answer;
+}
+
+/// The import's upload read as a sheet (I-40, I-41).
+Future<(String, Sheet)> _sheet(OpCall call) async {
+  final fileId = call.text("fileId");
+  final format = call.text("format", max: 16);
+  final row = _int(call, "row", 1);
+  final bytes = await call.engine.files.once(fileId, FilePurpose.import, uploader: call.session.accountId);
+
+  return (fileId, await Sheet.read(bytes, format, row));
+}
+
+/// `inventory.tables.normalize {tableId}` (I-47).
+Future<Object?> _normalize(OpCall call) async => call.write(() => call.engine.inventory.normalize(
+  call.text("tableId"), decimals: _decimals(call), actor: call.session.accountId, device: call.device.id,
 ));
 
 /// How many decimals the company's currency writes a price with (I-21).

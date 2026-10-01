@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'dart:io';
 import 'dart:isolate';
 import 'dart:typed_data';
@@ -151,6 +150,29 @@ final class FileStore {
     _store.write((db) => db.execute("UPDATE files SET referenced = 1, permission = ? WHERE id = ?", [permission, id]));
   }
 
+  /// The bytes of [uploader]'s fresh upload [id] of [purpose], for an op that reads a file once
+  /// (an import, I-40) instead of keeping it. Anything else is `invalid_file`. [discard] it after.
+  Future<Uint8List> once(String id, FilePurpose purpose, {required String uploader}) async {
+    final rows = _store.db.select("SELECT * FROM files WHERE id = ?", [id]);
+    final row = rows.isEmpty ? null : rows.first;
+    final file = File(p.join(_folder, id));
+
+    if (row == null || row["purpose"] != purpose.header || row["referenced"] != 0 || row["owner"] != uploader || !file.existsSync()) {
+      throw const EngineFailure("invalid_file");
+    }
+
+    return Envelope.open(_key, file.readAsBytesSync(), context: "lyra/file/$id");
+  }
+
+  /// Deletes [id] now: a file read [once] is never served again.
+  void discard(String id) {
+    _store.write((db) => db.execute("DELETE FROM files WHERE id = ?", [id]));
+
+    final file = File(p.join(_folder, id));
+    if (file.existsSync()) file.deleteSync();
+    _deleteThumbnail(id);
+  }
+
   /// The record let [id] go (a replaced logo): it becomes an orphan again, counted from now, and
   /// the sweep deletes it.
   void release(String id) => _store.write((db) => db.execute(
@@ -224,17 +246,13 @@ final class FileStore {
     return null;
   }
 
-  /// UTF-8 without NUL or other control bytes than tab and line breaks: what a CSV is.
+  /// What a CSV is (I-40): UTF-16 with its BOM, or 8-bit text (UTF-8, or Windows-1252 as Excel
+  /// saves it) without NUL or other control bytes than tab and line breaks.
   static bool _isText(Uint8List bytes) {
+    if (bytes.length >= 2 && (bytes[0] == 0xff && bytes[1] == 0xfe || bytes[0] == 0xfe && bytes[1] == 0xff)) return true;
+
     for (final byte in bytes.take(64 * 1024)) {
       if (byte == 0 || (byte < 0x20 && byte != 0x09 && byte != 0x0a && byte != 0x0d)) return false;
-    }
-
-    try {
-      utf8.decode(bytes.sublist(0, bytes.length.clamp(0, 64 * 1024)));
-    } on FormatException {
-      // A cut in the middle of a character at the 64 KiB mark is fine.
-      return bytes.length > 64 * 1024;
     }
 
     return true;

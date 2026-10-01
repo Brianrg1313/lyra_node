@@ -12,6 +12,8 @@ export 'src/crypto/vault.dart';
 export 'src/domain/business/business.dart';
 export 'src/domain/inventory/cells.dart';
 export 'src/domain/inventory/inventory.dart';
+export 'src/domain/inventory/spreadsheet.dart';
+export 'src/domain/inventory/typing.dart';
 export 'src/domain/stock/stock.dart';
 export 'src/engine.dart';
 export 'src/failure.dart';
