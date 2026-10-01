@@ -13,7 +13,7 @@ import 'package:lyra_protocol/lyra_protocol.dart';
 ///
 /// | command | stdin | stdout |
 /// |---|---|---|
-/// | `setup` | `{owner: {username, password, firstName, lastName, email?}, company?: {name, country, currency, language, timezone?}, device?, passphrase?}` | `{instanceId, recovery: [24 words], device?}` |
+/// | `setup` | `{owner: {username, password, firstName, lastName, email?}, company?: {name, country, currency, language, timezone?, activity?, cloudId?}, device?, passphrase?}` | `{instanceId, recovery: [24 words], device?}` |
 /// | `run [--port <n>] [--web <folder>]` | the passphrase, one line, with `--passphrase-stdin` | nothing; runs until stopped |
 /// | `status` | — | `{status, pid?, version?, instanceId?, port?}` |
 /// | `stop` | — | `{stopped: bool}` |
