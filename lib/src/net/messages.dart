@@ -37,6 +37,7 @@ abstract final class Messages {
     "invalid_file": "The file is not a type or size that can be used here.",
     "invalid_point": "The location needs both a valid latitude and a valid longitude.",
     "invalid_timezone": "That time zone doesn't exist.",
+    "already_linked": "This server already works with another company online.",
     "invalid_value": "That value doesn't fit this column.",
     "read_only_field": "Lyra fills in this column: it can't be written by hand.",
     "duplicate_field_type": "A table can have only one column of this type.",

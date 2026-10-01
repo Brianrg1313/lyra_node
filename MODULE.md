@@ -40,7 +40,7 @@ one writer. Phase 2 built storage, keys, oplog, identities, audit and the proces
 - `lib/src/storage/migrations/m002_network.dart` — `devices`, `sessions`, `refresh_spent`, `events`, `files`.
 - `lib/src/storage/migrations/m003_business.dart` — `company`, `site` (one row each; the point in millionths).
 - `lib/src/domain/business/business.dart` — `CompanyDraft` (setup or `business.create`, checked before anything is
-  written), `Business` (`create`, `profile`, `summary`, `edit` one key, `setLogo`, `site`, `editSite`, `timezone`, `language`, `currency`,
+  written), `Business` (`create`, `profile`, `summary`, `edit` one key, `setLogo`, `link` + `cloudId`, `site`, `editSite`, `timezone`, `language`, `currency`,
   `decimals`): `business.md`.
 - `lib/src/domain/business/zones.dart` — `Zones` (the IANA database compiled in: `known`, `dayOf` a zone's day in UTC,
   `startOf` a calendar day, `local` an instant as ISO with the zone's offset).
@@ -54,6 +54,7 @@ one writer. Phase 2 built storage, keys, oplog, identities, audit and the proces
   blob).
 - `lib/src/storage/migrations/m009_employees.dart` — `employments`, `sealed_fields` (one sealed value per row, to `hr`
   and to the person), `activations` (a pending account's code, hashed).
+- `lib/src/storage/migrations/m010_cloud_link.dart` — `company.cloud_id` (the cloud company it is one with).
 - `lib/src/domain/employees/employees.dart` — `Employees` (`list` shaped by permission, `former`, `detail` with the
   E-4 measures and the sealed fields of `hr` or one's own, `invite` with a pending account and its code,
   `reissueActivation`, `accept`, `acceptInvitations`, `draftEdit` / `draftOwn` checked and sealed before `save`),
@@ -135,7 +136,7 @@ one writer. Phase 2 built storage, keys, oplog, identities, audit and the proces
 - `test/crypto_test.dart`, `keyring_test.dart`, `storage_test.dart`, `oplog_test.dart`, `engine_test.dart` — units.
 - `test/net_test.dart` — the LAN server with real TLS clients: handshake, pairing, man in the middle, revocation,
   sessions, passphrase mode, browsers (the page marked as a master's), events, files.
-- `test/business_test.dart` — the business domain over the LAN: bootstrap, profile edits and their refusals, idempotence,
+- `test/business_test.dart` — the business domain over the LAN: bootstrap, profile edits and their refusals, the cloud link, idempotence,
   `business/changed`, permissions, the site's point, the logo, `catalog.get` (rule numbers in the names).
 - `test/inventory_test.dart` — inventory and stock over the LAN: tables, templates and the primary flag, fields and
   positions, cells and SKUs, search, images and thumbnails, movements, holds, replays, events, history, summary.

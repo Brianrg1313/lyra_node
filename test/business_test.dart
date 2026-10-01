@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:lyra_node/lyra_node.dart';
 import 'package:lyra_protocol/lyra_protocol.dart';
 import 'package:test/test.dart';
 import 'package:uuid/uuid.dart';
@@ -111,6 +112,65 @@ void main() {
       final (reader, _) = await bare.signIn();
 
       await expectRefusal(create(reader, draft), ErrorCodes.forbidden);
+    });
+  });
+
+  group('business.link', () {
+    Future<Object?> link(RpcClient client, String cloudId) =>
+      client.call(Ops.businessLink, args: {"cloudId": cloudId}, commandId: const Uuid().v7());
+
+    test('the owner links the company once; the bootstrap carries it (B-30, B-31)', () async {
+      final events = <RpcEvent>[];
+      final subscription = client.events.listen(events.add);
+      addTearDown(subscription.cancel);
+      await client.call(Ops.eventsSubscribe);
+
+      final bootstrap = await client.call(Ops.sessionBootstrap) as Map;
+      expect(((bootstrap["businesses"] as List).single as Map)["cloudId"], isNull);
+
+      final linked = await link(client, " 6650f1c2a9e4b8d3f0a1b2c3 ") as Map;
+      expect(linked["cloudId"], "6650f1c2a9e4b8d3f0a1b2c3");
+
+      final again = await client.call(Ops.sessionBootstrap) as Map;
+      expect(((again["businesses"] as List).single as Map)["cloudId"], "6650f1c2a9e4b8d3f0a1b2c3");
+
+      // The same id again answers as the first time; another one is refused.
+      expect((await link(client, "6650f1c2a9e4b8d3f0a1b2c3") as Map)["cloudId"], "6650f1c2a9e4b8d3f0a1b2c3");
+      await expectRefusal(link(client, "another"), "already_linked");
+
+      final engine = master.openEngine;
+      expect(engine.audit.list().where((entry) => entry.kind == AuditKinds.companyLinked), hasLength(1));
+      expect(engine.business.cloudId, "6650f1c2a9e4b8d3f0a1b2c3");
+
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      expect(events.single.event, Events.businessChanged);
+      expect(events.single.data, {"keys": ["cloudId"]});
+    });
+
+    test("an id that isn't one is refused, and only the owner links", () async {
+      await expectRefusal(link(client, "not an id"), ErrorCodes.invalidField);
+      await expectRefusal(link(client, ""), ErrorCodes.invalidField);
+
+      final account = tokens["accountId"] as String;
+      master.openEngine.store.write((db) {
+        db.execute("DELETE FROM grants WHERE account = ?", [account]);
+        db.execute("INSERT INTO grants (account, permission) VALUES (?, 'business.view')", [account]);
+      });
+      final (reader, _) = await master.signIn();
+
+      await expectRefusal(link(reader, "6650f1c2a9e4b8d3f0a1b2c3"), ErrorCodes.forbidden);
+    });
+
+    test('a company made from the cloud starts linked', () async {
+      final bare = await TestMaster.start(withCompany: false);
+      final (owner, _) = await bare.signIn();
+
+      final created = await owner.call(Ops.businessCreate, args: {
+        "name": "Lovelace Café", "country": "VE", "currency": "USD", "language": "es", "cloudId": "cloud-1",
+      }, commandId: const Uuid().v7()) as Map;
+
+      expect(created["cloudId"], "cloud-1");
+      await expectRefusal(link(owner, "cloud-2"), "already_linked");
     });
   });
 

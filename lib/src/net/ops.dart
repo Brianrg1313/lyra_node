@@ -48,6 +48,7 @@ final Map<String, OpRule> opRules = {
   Ops.businessProfile.name: const OpRule(_profile, permission: _businessView),
   Ops.businessEdit.name: const OpRule(_editProfile, permission: "business.settings.edit"),
   Ops.businessSetLogo.name: const OpRule(_setLogo, permission: "business.settings.edit_logo"),
+  Ops.businessLink.name: const OpRule(_link),
   Ops.businessSiteGet.name: const OpRule(_site, permission: _businessView),
   Ops.businessSiteEdit.name: const OpRule(_editSite, permission: "business.settings.edit"),
   Ops.inventoryTablesList.name: const OpRule(_tables, permission: _inventoryView),
@@ -455,6 +456,15 @@ Future<Object?> _setLogo(OpCall call) async {
     actor: call.session.accountId,
     device: call.device.id,
   ));
+}
+
+/// `business.link {cloudId}` (B-30, B-31): the owner makes the company one with its cloud twin.
+Future<Object?> _link(OpCall call) async {
+  if (!_isOwner(call)) throw const EngineFailure(ErrorCodes.forbidden);
+
+  final cloudId = call.text("cloudId", max: 64);
+
+  return call.write(() => call.engine.business.link(cloudId, actor: call.session.accountId, device: call.device.id));
 }
 
 Future<Object?> _site(OpCall call) async => call.engine.business.site();

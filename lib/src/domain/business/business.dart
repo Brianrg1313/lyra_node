@@ -20,6 +20,7 @@ final class CompanyDraft {
     required this.language,
     this.timezone,
     this.activity,
+    this.cloudId,
   });
 
   factory CompanyDraft.fromJson(Map<String, Object?> json) => CompanyDraft(
@@ -29,6 +30,7 @@ final class CompanyDraft {
     language: json["language"] as String? ?? "",
     timezone: json["timezone"] as String?,
     activity: json["activity"] as String?,
+    cloudId: json["cloudId"] as String?,
   );
 
   final String name;
@@ -40,6 +42,9 @@ final class CompanyDraft {
   /// A code of `Catalogs.activities`, what the welcome's "create company" asks.
   final String? activity;
 
+  /// The cloud company it is made from (B-30): a master created from the cloud starts linked.
+  final String? cloudId;
+
   /// Throws the refusal for the first field that is wrong, before anything is written.
   void check() {
     Business._text("name", name, required: true);
@@ -50,6 +55,7 @@ final class CompanyDraft {
     Business._language(language);
     if (timezone != null && timezone!.trim().isNotEmpty) Business._timezone(timezone!);
     Business._activity(activity);
+    if (cloudId != null) Business._cloudId(cloudId!);
   }
 }
 
@@ -92,12 +98,14 @@ final class Business {
     final name = draft.name.trim();
     final timezone = draft.timezone?.trim();
 
+    final cloudId = draft.cloudId == null ? null : Business._cloudId(draft.cloudId!);
+
     db.execute(
-      "INSERT INTO company (id, name, country, currency, language, timezone, activity, created, created_hlc, updated_hlc) "
-      "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      "INSERT INTO company (id, name, country, currency, language, timezone, activity, cloud_id, created, created_hlc, updated_hlc) "
+      "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       [id, name, draft.country.trim().toUpperCase(), draft.currency.trim().toUpperCase(),
         draft.language.trim().toLowerCase(), timezone == null || timezone.isEmpty ? null : timezone,
-        Business._activity(draft.activity),
+        Business._activity(draft.activity), cloudId,
         now.toUtc().toIso8601String(), stamp.pack(), stamp.pack()],
     );
     db.execute(
@@ -109,8 +117,13 @@ final class Business {
       "country": draft.country,
       "currency": draft.currency,
       "language": draft.language,
+      "cloudId": ?cloudId,
     }, actor: actor);
-    AuditLog(db, now: () => now).append(AuditKinds.companyCreated, actor: actor, data: {"company": id, "name": name});
+    AuditLog(db, now: () => now).append(AuditKinds.companyCreated, actor: actor, data: {
+      "company": id,
+      "name": name,
+      "cloudId": ?cloudId,
+    });
   }
 
   bool get exists => _db.select("SELECT 1 FROM company WHERE deleted = 0").isNotEmpty;
@@ -143,6 +156,9 @@ final class Business {
 
     return Catalogs.country(row["country"] as String)?["timezone"] as String? ?? "UTC";
   }
+
+  /// The cloud company this one is linked to (B-30), null while it isn't.
+  String? get cloudId => _company["cloud_id"] as String?;
 
   /// The country the company operates in (ISO 3166-1 alpha-2): which payment rails it is offered.
   String get country => _company["country"] as String;
@@ -196,6 +212,7 @@ final class Business {
       "activity": row["activity"],
       "profile": row["nickname"],
       "currency": row["currency"],
+      "cloudId": row["cloud_id"],
     };
   }
 
@@ -239,6 +256,30 @@ final class Business {
     });
 
     return profile(owner: owner);
+  }
+
+  /// `business.link {cloudId}` (B-30, B-31): the company becomes one with that cloud company, once.
+  /// Repeating the same id answers as the first time; another one is refused (`already_linked`),
+  /// since the master's data would then be merged into a second company.
+  Map<String, Object?> link(String raw, {required String actor, String? device}) {
+    final cloudId = _cloudId(raw);
+
+    _store.write((db) {
+      final row = _company;
+      final current = row["cloud_id"] as String?;
+
+      if (current == cloudId) return;
+      if (current != null) throw const EngineFailure("already_linked");
+
+      final stamp = _clock.tick();
+      final id = row["id"] as String;
+      db.execute("UPDATE company SET cloud_id = ?, updated_hlc = ? WHERE id = ?", [cloudId, stamp.pack(), id]);
+      Oplog(db).append(hlc: stamp, entity: "company", entityId: id, kind: "linked", payload: {"cloudId": cloudId}, actor: actor, device: device);
+      AuditLog(db, now: _now).append(AuditKinds.companyLinked, actor: actor, data: {"company": id, "cloudId": cloudId});
+      EventLog.append(db, Events.businessChanged, {"keys": ["cloudId"]}, at: _now(), permission: viewPermission);
+    });
+
+    return summary();
   }
 
   /// `business.site.get`: the one site, with the company's country (B-12). `maps` is left to
@@ -373,6 +414,14 @@ final class Business {
       return null;
     }
     if (value.length > (_limits[key] ?? 256)) throw EngineFailure(ErrorCodes.invalidField, {"field": key});
+
+    return value;
+  }
+
+  /// A cloud company's id as the backend writes it: letters, digits, `-` and `_`, 64 at most.
+  static String _cloudId(String raw) {
+    final value = raw.trim();
+    if (!RegExp(r"^[A-Za-z0-9_-]{1,64}$").hasMatch(value)) throw const EngineFailure(ErrorCodes.invalidField, {"field": "cloudId"});
 
     return value;
   }

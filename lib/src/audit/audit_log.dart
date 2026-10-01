@@ -14,6 +14,7 @@ abstract final class AuditKinds {
   static const migrationApplied = "migration.applied";
   static const accountCreated = "account.created";
   static const companyCreated = "company.created";
+  static const companyLinked = "company.linked";
   static const fieldDeleted = "inventory.field_deleted";
   static const signInFailed = "auth.failed";
   static const accountLocked = "auth.locked";
