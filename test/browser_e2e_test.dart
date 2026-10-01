@@ -17,7 +17,7 @@ import 'support.dart';
 /// (`protocol-v1.md` §3): WebCrypto key, browser WebSocket, `device.prove`.
 ///
 /// Opt-in, it needs Chrome and a web build:
-/// `flutter build web --release --dart-define=LYRA_LAN=true --no-web-resources-cdn` in the app,
+/// `flutter build web --release --no-web-resources-cdn` in the app,
 /// then `LYRA_WEB=<app>/build/web dart test test/browser_e2e_test.dart`. Chrome trusts the
 /// server certificate by an SPKI pin here, standing in for the CA a person installs.
 void main() {

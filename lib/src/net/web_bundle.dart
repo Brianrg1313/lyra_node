@@ -7,10 +7,17 @@ import 'package:path/path.dart' as p;
 ///
 /// Static files only. A path that isn't a file answers `index.html` (the app routes it), and a
 /// path that climbs out of [root] is refused.
+///
+/// The app is one build for the cloud and for a master, so the page learns where it runs from
+/// [marker], which only a master writes into the HTML it serves: with it, the page is the
+/// master's and pairs with it; without it, it is the cloud app.
 final class WebBundle {
   const WebBundle(this.root);
 
   final String root;
+
+  /// What the app looks for (`lan_web.dart`): a `<meta>`, since the CSP allows no inline script.
+  static const marker = '<meta name="lyra-master" content="1">';
 
   /// The browser may load and connect only to this origin; the app runs as WebAssembly or
   /// JavaScript from it. No inline scripts, no frames around it.
@@ -65,7 +72,11 @@ final class WebBundle {
       response.headers.set("Cache-Control", "max-age=86400");
     }
 
-    await response.addStream(file.openRead());
+    if (extension == ".html") {
+      response.write((await file.readAsString()).replaceFirst("<head>", "<head>$marker"));
+    } else {
+      await response.addStream(file.openRead());
+    }
     await response.close();
   }
 }

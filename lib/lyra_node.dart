@@ -39,6 +39,7 @@ export 'src/net/files.dart';
 export 'src/net/pairing.dart';
 export 'src/net/server.dart';
 export 'src/net/tls.dart';
+export 'src/net/web_bundle.dart';
 export 'src/net/x509.dart';
 export 'src/oplog/commands.dart';
 export 'src/oplog/hlc.dart';

@@ -400,6 +400,29 @@ void main() {
       );
     });
 
+    test('the page it serves says it is a master: one web build for the cloud and the LAN', () async {
+      final web = Directory.systemTemp.createTempSync("lyra_web");
+      addTearDown(() => web.deleteSync(recursive: true));
+      File("${web.path}/index.html").writeAsStringSync("<!DOCTYPE html><html><head><title>Lyra</title></head></html>");
+      File("${web.path}/main.dart.js").writeAsStringSync("// <head>");
+
+      final master = await TestMaster.start(webRoot: web.path);
+      final context = SecurityContext(withTrustedRoots: false)
+        ..setTrustedCertificatesBytes(utf8.encode(Pem.encode("CERTIFICATE", master.openEngine.authority.pinned.der)));
+      final client = HttpClient(context: context);
+      addTearDown(() => client.close(force: true));
+
+      Future<String> get(String path) async {
+        final response = await (await client.getUrl(Uri.parse("https://127.0.0.1:${master.port}$path"))).close();
+
+        return utf8.decode(await response.expand((chunk) => chunk).toList());
+      }
+
+      expect(await get("/"), "<!DOCTYPE html><html><head>${WebBundle.marker}<title>Lyra</title></head></html>");
+      expect(await get("/home/finance"), contains(WebBundle.marker));
+      expect(await get("/main.dart.js"), "// <head>");
+    });
+
     test('a signed-in device gets the browser root: same key, name-constrained', () async {
       final master = await TestMaster.start();
       final (client, _) = await master.signIn();

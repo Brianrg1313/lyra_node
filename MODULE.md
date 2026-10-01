@@ -108,7 +108,7 @@ one writer. Phase 2 built storage, keys, oplog, identities, audit and the proces
   `discard` for an import, `keep` an export for its asker (expires after `orphanAge`), orphan sweep),
   `FilePurpose`.
 - `lib/src/net/messages.dart` — `Messages` (refusal code → `RpcError` with message and action).
-- `lib/src/net/web_bundle.dart` — `WebBundle` (static web build, CSP).
+- `lib/src/net/web_bundle.dart` — `WebBundle` (static web build, CSP, `marker` written into its HTML).
 - `lib/src/net/discovery.dart` — `MdnsResponder` (`_lyra._tcp.local`).
 - `lib/src/process/paths.dart` — `NodePaths` (data folder per OS and its files).
 - `lib/src/process/lock.dart` — `InstanceLock` (exclusive OS lock, one engine per folder).
@@ -122,7 +122,7 @@ one writer. Phase 2 built storage, keys, oplog, identities, audit and the proces
 - `test/net_support.dart` — `TestMaster` (a master on loopback with its app enrolled), browser and attacker helpers.
 - `test/crypto_test.dart`, `keyring_test.dart`, `storage_test.dart`, `oplog_test.dart`, `engine_test.dart` — units.
 - `test/net_test.dart` — the LAN server with real TLS clients: handshake, pairing, man in the middle, revocation,
-  sessions, passphrase mode, browsers, events, files.
+  sessions, passphrase mode, browsers (the page marked as a master's), events, files.
 - `test/business_test.dart` — the business domain over the LAN: bootstrap, profile edits and their refusals, idempotence,
   `business/changed`, permissions, the site's point, the logo, `catalog.get` (rule numbers in the names).
 - `test/inventory_test.dart` — inventory and stock over the LAN: tables, templates and the primary flag, fields and
