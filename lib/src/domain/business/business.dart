@@ -124,11 +124,15 @@ final class Business {
 
   String get id => _company["id"] as String;
 
-  /// The company's zone, or its country's default one (B-9).
+  /// The company's zone, or its country's default one (B-9). A zone stored before the engine
+  /// carried the database was only checked for its shape: one the database doesn't know reads as
+  /// the country's, so "today" never fails.
   String get timezone {
     final row = _company;
+    final stored = row["timezone"] as String?;
+    if (stored != null && Zones.known(stored)) return stored;
 
-    return row["timezone"] as String? ?? Catalogs.country(row["country"] as String)?["timezone"] as String? ?? "UTC";
+    return Catalogs.country(row["country"] as String)?["timezone"] as String? ?? "UTC";
   }
 
   /// The company's language (`es`, `en`, …): what catalogue texts are named in (B-22).
