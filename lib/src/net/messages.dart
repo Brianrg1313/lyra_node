@@ -62,6 +62,19 @@ abstract final class Messages {
     "not_a_ticket": "Only a charged sale has a handover.",
     "invalid_state": "That handover step doesn't exist for that way of handing over.",
     "nothing_to_change": "Say how the sale is handed over, or how far that got.",
+    "invalid_amount": "The amount must be more than zero, with no more decimals than the currency has.",
+    "future_date": "A payment can't be dated in the future.",
+    "unknown_account": "That account doesn't exist or was removed.",
+    "method_mismatch": "That account takes a different payment method.",
+    "ticket_not_allowed": "This kind of payment can't name a sale.",
+    "ticket_required": "Say which sale this payment collects.",
+    "not_credit": "That sale wasn't sold on credit.",
+    "exceeds_outstanding": "That's more than what is still owed on the sale.",
+    "already_voided": "That payment was already voided.",
+    "unknown_currency": "That currency isn't available.",
+    "is_main": "That is already the company's main currency.",
+    "invalid_rate": "The rate must be a number greater than zero.",
+    "in_use": "An account still takes payments in that currency.",
   };
 
   /// Codes whose client must go somewhere (`ErrorActions`).

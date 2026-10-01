@@ -422,6 +422,14 @@ final class Pos {
   /// [row] as the sales board reads it: every figure computed from its lines.
   Map<String, Object?> document(Row row) => _invoice(row);
 
+  /// What a line comes to (POS-20): `price × qty` plus its tax, rounded once. A ticket's total is
+  /// the sum of its lines', which is how the money screen adds tickets up without reading each one.
+  static int lineTotal(int price, int qty, String rate) {
+    final subtotal = price * qty;
+
+    return subtotal + Money.percentOf(subtotal, rate);
+  }
+
   // ---------------------------------------------------------------- internals
 
   /// [id] as an invoice a write may change (POS-18).

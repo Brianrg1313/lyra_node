@@ -10,6 +10,7 @@ import '../identity/permissions.dart';
 import '../audit/audit_log.dart';
 import '../domain/inventory/inventory.dart';
 import '../domain/inventory/spreadsheet.dart';
+import '../domain/money/finance.dart';
 import '../domain/sales/sales.dart';
 import 'files.dart';
 import 'rpc.dart';
@@ -79,6 +80,16 @@ final Map<String, OpRule> opRules = {
   Ops.salesCatalog.name: const OpRule(_salesCatalog, permission: _salesView),
   Ops.salesDetail.name: const OpRule(_saleDetail, permission: _salesView),
   Ops.salesFulfil.name: const OpRule(_fulfil, permission: "sales.fulfil"),
+  Ops.moneyCatalog.name: const OpRule(_moneyCatalog, permission: "finance.view"),
+  Ops.moneySummary.name: const OpRule(_moneySummary, permission: "finance.overview.view"),
+  // `finance.payments.record`, or `finance.receivables.collect` for a concept that settles (M-7).
+  Ops.moneyPaymentsRecord.name: const OpRule(_recordPayment),
+  Ops.moneyPaymentsVoid.name: const OpRule(_voidPayment, permission: "finance.payments.void"),
+  Ops.moneyPaymentsSearch.name: const OpRule(_payments, permission: "finance.payments.view"),
+  Ops.moneyReceivables.name: const OpRule(_receivables, permission: "finance.receivables.view"),
+  Ops.moneyCurrenciesGet.name: const OpRule(_currencies, permission: "finance.methods.view"),
+  Ops.moneyCurrenciesSave.name: const OpRule(_saveCurrency, permission: _manageCurrencies),
+  Ops.moneyCurrenciesRemove.name: const OpRule(_removeCurrency, permission: _manageCurrencies),
 };
 
 const _businessView = "business.view";
@@ -87,6 +98,7 @@ const _editColumns = "inventory.edit_columns";
 const _editRecords = "inventory.edit_records";
 const _posView = "pos.view";
 const _salesView = "sales.view";
+const _manageCurrencies = "finance.methods.manage_currencies";
 
 /// `docs/app-areas.json`, area `local_server`.
 const _devicesPermission = "local_server.devices";
@@ -652,4 +664,83 @@ bool _bool(OpCall call, String name) {
   if (value != null && value is! bool) throw EngineFailure(ErrorCodes.invalidField, {"field": name});
 
   return value == true;
+}
+
+// ---------------------------------------------------------------- money (`money.md`)
+
+Future<Object?> _moneyCatalog(OpCall call) async => call.engine.finance.catalog();
+
+/// `money.summary {from?}` (M-20): an instant; today in the company's zone without one.
+Future<Object?> _moneySummary(OpCall call) async {
+  final raw = call.args["from"];
+  final from = raw == null ? null : raw is String ? DateTime.tryParse(raw.trim()) : null;
+  if (raw != null && from == null) throw const EngineFailure(ErrorCodes.invalidField, {"field": "from"});
+
+  return call.engine.finance.summary(from: from);
+}
+
+/// `money.payments.record` (M-1 to M-9): which permission it needs depends on the concept.
+Future<Object?> _recordPayment(OpCall call) async {
+  final concept = Finance.conceptOf(call.args["concept"]);
+  final permission = MoneyConcepts.kinds[concept]!.$3 ? "finance.receivables.collect" : "finance.payments.record";
+  if (!Permissions.allows(call.connection.grants, permission)) throw const EngineFailure(ErrorCodes.forbidden);
+
+  return call.write(() => call.engine.finance.record(call.args, actor: call.session.accountId, device: call.device.id));
+}
+
+/// `money.payments.void {id, reason?}` (M-8).
+Future<Object?> _voidPayment(OpCall call) async => call.write(() => call.engine.finance.voidPayment(
+  call.text("id"),
+  reason: call.args["reason"],
+  actor: call.session.accountId,
+  device: call.device.id,
+));
+
+/// `money.payments.search {page, size, direction?, concept?, method?, status?}` (M-10).
+Future<Object?> _payments(OpCall call) async {
+  final (page, size) = _paging(call, MoneyLimits.maxPage, 50);
+
+  return call.engine.finance.search(
+    page: page,
+    size: size,
+    direction: call.args["direction"] == null ? null : call.text("direction", max: 8),
+    concept: call.args["concept"] == null ? null : call.text("concept", max: 32),
+    method: call.args["method"] == null ? null : call.text("method", max: 32),
+    status: call.args["status"] == null ? "all" : call.text("status", max: 16),
+  );
+}
+
+/// `money.receivables {page, size, open?}` (M-31).
+Future<Object?> _receivables(OpCall call) async {
+  final (page, size) = _paging(call, MoneyLimits.maxPage, 50);
+
+  return call.engine.finance.receivables(page: page, size: size, open: _bool(call, "open"));
+}
+
+Future<Object?> _currencies(OpCall call) async => call.engine.finance.currencies();
+
+/// `money.currencies.save {currency, mode, rate?}` (M-51 to M-53).
+Future<Object?> _saveCurrency(OpCall call) async => call.write(() => call.engine.finance.saveCurrency(
+  currency: call.text("currency", max: 8),
+  mode: call.args["mode"],
+  rate: call.args["rate"],
+  actor: call.session.accountId,
+  device: call.device.id,
+));
+
+/// `money.currencies.remove {currency}`.
+Future<Object?> _removeCurrency(OpCall call) async => call.write(() => call.engine.finance.removeCurrency(
+  call.text("currency", max: 8),
+  actor: call.session.accountId,
+  device: call.device.id,
+));
+
+/// `page` ≥ 1 and `size` from 1 to [max].
+(int, int) _paging(OpCall call, int max, int fallback) {
+  final page = _int(call, "page", 1);
+  final size = _int(call, "size", fallback);
+  if (page < 1) throw const EngineFailure(ErrorCodes.invalidField, {"field": "page"});
+  if (size < 1 || size > max) throw const EngineFailure(ErrorCodes.invalidField, {"field": "size"});
+
+  return (page, size);
 }

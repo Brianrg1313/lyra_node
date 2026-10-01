@@ -11,6 +11,7 @@ import 'crypto/secrets.dart';
 import 'crypto/vault.dart';
 import 'domain/business/business.dart';
 import 'domain/inventory/inventory.dart';
+import 'domain/money/finance.dart';
 import 'domain/pos/pos.dart';
 import 'domain/sales/sales.dart';
 import 'domain/stock/stock.dart';
@@ -144,6 +145,8 @@ final class Engine {
   late final Pos pos = Pos(store, clock, inventory, stock, business, now: _now);
 
   late final Sales sales = Sales(store, clock, pos, business, now: _now);
+
+  late final Finance finance = Finance(store, clock, business, now: _now);
 
   Devices get devices => Devices(store, clock, now: _now);
 

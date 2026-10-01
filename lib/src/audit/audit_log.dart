@@ -24,6 +24,7 @@ abstract final class AuditKinds {
   static const deviceRevoked = "device.revoked";
   static const pairingFailed = "pairing.failed";
   static const engineUnlocked = "engine.unlocked";
+  static const paymentVoided = "money.payment_voided";
 }
 
 final class AuditEntry {

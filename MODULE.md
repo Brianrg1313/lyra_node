@@ -3,7 +3,7 @@
 **Path** `E:/andromeda/frontend/packages/lyra_node` (own git repo, pure Dart, no Flutter)
 **Role** The engine that runs on the master (`lyra/app/docs/plan-offline-lan.md` §3, §8): one company, encrypted,
 one writer. Phase 2 built storage, keys, oplog, identities, audit and the process lifecycle; phase 3 the LAN server
-(TLS, pairing, RPC, events, files, mDNS); phase 4 adds the domains one per release (business, inventory and stock, import, POS so far). Rules come from `lyra/app/docs/offline/specs/*`, never from backend code (plan principle 1).
+(TLS, pairing, RPC, events, files, mDNS); phase 4 adds the domains one per release (business, inventory and stock, import, POS, sales, finance so far). Rules come from `lyra/app/docs/offline/specs/*`, never from backend code (plan principle 1).
 **Used by** `lyra/app` through the executable only (`LocalServerService`), never as a Dart import.
 
 ## Files
@@ -13,7 +13,7 @@ one writer. Phase 2 built storage, keys, oplog, identities, audit and the proces
 - `lib/lyra_node.dart` — barrel (for `bin/` and tests).
 - `lib/src/engine.dart` — `Engine` (`setup` with the owner and the company, `open`, `recover`, `close`, `controlKey`,
   `enrollMaster`, `prepareTransport`; holds `sessions`, `events`, `authority`, `files`, `business`, `inventory`,
-  `stock`, `pos`, `sales`), `OwnerDraft`,
+  `stock`, `pos`, `sales`, `finance`), `OwnerDraft`,
   `DeviceDraft`, `EnrolledDevice`,
   `engineVersion`, `minAppVersion`.
 - `lib/src/failure.dart` — `EngineFailure` (a rule's refusal: stable `code` + `data`, no message).
@@ -41,6 +41,8 @@ one writer. Phase 2 built storage, keys, oplog, identities, audit and the proces
 - `lib/src/storage/migrations/m004_inventory.dart` — `inventory_tables`, `inventory_fields`, `inventory_records` (cells as
   one JSON object), `stock_movements`, `stock_balances`, `stock_holds`.
 - `lib/src/storage/migrations/m005_pos.dart` — `pos_invoices`, `pos_lines` (a line's id is its hold's), `pos_series`.
+- `lib/src/storage/migrations/m006_money.dart` — `money_payments` (never edited: voided in place), `money_currencies`
+  (one row per currency ever added, `active`).
 - `lib/src/domain/inventory/inventory.dart` — `Inventory`: tables (templates, primary flag), fields (dense positions,
   re-typing, width alone), records (checked cells, SKU, counter, text search), images; reads for the ledger
   (`product`, `primaryTable`): `inventory.md`.
@@ -54,10 +56,13 @@ one writer. Phase 2 built storage, keys, oplog, identities, audit and the proces
 - `lib/src/domain/stock/stock.dart` — `Stock` (`move` with the projection, manual holds and a ticket line's hold,
   `held`, `balanceOf`, `history`, `summary`, `rebuild`): `stock.md`.
 - `lib/src/domain/pos/pos.dart` — `Pos` (`summary`, `methods`, `catalog` by field type and cursor, `open` with the
-  device's code, `line`, `close`, `cancel`, `list`; every figure computed from frozen lines): `pos.md`.
+  device's code, `line`, `close`, `cancel`, `list`; every figure computed from frozen lines, `lineTotal`): `pos.md`.
 - `lib/src/domain/pos/money.dart` — `Money` (minor units, percents as text, half away from zero, in integers).
 - `lib/src/domain/sales/sales.dart` — `Sales` (`catalog`, `list` paged in SQL by the measured stage, `row`, `detail`,
   `fulfil`; `measure` and `announce` of `sale/progress`, which `Pos` calls on its writes): `sales.md`.
+- `lib/src/domain/money/finance.dart` — `Finance` (`catalog`, `record` and `voidPayment` (audited), `search` with the
+  filter's totals, `summary` beside the closed tickets, `receivables` measured from settlements, `currencies` with
+  custom rates; `credit` off): `money.md`.
 - `lib/src/oplog/hlc.dart` — `Hlc` (packed, sortable), `HlcClock` (never backwards, `maxDrift`), `ClockDrift`.
 - `lib/src/oplog/oplog.dart` — `Oplog` (`append` inside the write, `since`, `lastSeq`, `lastHlc`), `OplogEntry`.
 - `lib/src/oplog/commands.dart` — `CommandLedger` (`commandId` idempotence, 30 days), `CommandReused`.
@@ -109,6 +114,8 @@ one writer. Phase 2 built storage, keys, oplog, identities, audit and the proces
   holds, refusals and their permissions, close and cancel, untracked products, I-4, events to a cashier.
 - `test/sales_test.dart` — the sales board over the LAN: catalogue, sections and order, the handover and its
   refusals, the detail of an invoice and of a ticket, `sales.view_all` on the list, detail, write and notices.
+- `test/finance_test.dart` — money over the LAN: the catalogue offline, recording and voiding with their refusals and
+  the audit, the history's order and totals, the summary beside the register, receivables, currencies, permissions.
 - `test/import_test.dart` — importing: `.csv` / `.xlsx` reading, the typing rules, both steps over the LAN with their
   events and opening balances, normalizing, limits.
 - `test/discovery_test.dart` — mDNS answers (and a live lookup, tag `network`).
