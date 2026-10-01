@@ -3,7 +3,7 @@
 **Path** `E:/andromeda/frontend/packages/lyra_node` (own git repo, pure Dart, no Flutter)
 **Role** The engine that runs on the master (`lyra/app/docs/plan-offline-lan.md` §3, §8): one company, encrypted,
 one writer. Phase 2 built storage, keys, oplog, identities, audit and the process lifecycle; phase 3 the LAN server
-(TLS, pairing, RPC, events, files, mDNS); phase 4 adds the domains one per release (business, inventory and stock, import, POS, sales, finance with its accounts and the accounting export so far). Rules come from `lyra/app/docs/offline/specs/*`, never from backend code (plan principle 1).
+(TLS, pairing, RPC, events, files, mDNS); phase 4 adds the domains one per release (business, inventory and stock, import, POS, sales, finance with its accounts and the accounting export, employees so far). Rules come from `lyra/app/docs/offline/specs/*`, never from backend code (plan principle 1).
 **Used by** `lyra/app` through the executable only (`LocalServerService`), never as a Dart import.
 
 ## Files
@@ -13,7 +13,7 @@ one writer. Phase 2 built storage, keys, oplog, identities, audit and the proces
 - `lib/lyra_node.dart` — barrel (for `bin/` and tests).
 - `lib/src/engine.dart` — `Engine` (`setup` with the owner and, optionally, the company, `open`, `recover`, `close`, `controlKey`,
   `enrollMaster`, `prepareTransport`; holds `sessions`, `events`, `authority`, `files`, `business`, `inventory`,
-  `stock`, `pos`, `sales`, `finance`, `methods`, `accounting`, `sealed`), `OwnerDraft`,
+  `stock`, `pos`, `sales`, `finance`, `methods`, `accounting`, `employees`, `sealed`), `OwnerDraft`,
   `DeviceDraft`, `EnrolledDevice`,
   `engineVersion`, `minAppVersion`.
 - `lib/src/failure.dart` — `EngineFailure` (a rule's refusal: stable `code` + `data`, no message).
@@ -26,8 +26,9 @@ one writer. Phase 2 built storage, keys, oplog, identities, audit and the proces
 - `lib/src/crypto/wordlist.dart` — the BIP-39 English list.
 - `lib/src/crypto/sealed.dart` — `SealedKeys` (plan §6.3: an X25519 pair per account sealed by its password, each
   scope's key wrapped to its holders and to the recovery key, a session's keys sealed by its refresh token;
-  `signedIn`, `refreshed`, `key`, `rewrap` + `save`, `setRecovery`, `recover`, `sealJson` / `openJson`), `SealedScope`
-  (`hr`, `payments`), `AccountKeyWrap`.
+  `signedIn`, `refreshed`, `key`, `own` (the account's private key), `rewrap` + `save`, `setRecovery`, `recover`,
+  `sealJson` / `openJson`, and with no key in hand `sealToScope` / `sealToAccount`, opened by `openWithScope` /
+  `openWithOwn`), `SealedScope` (`hr`, `payments`), `AccountKeyWrap`.
 - `lib/src/crypto/vault.dart` — `KeyVault` (`platform`), `WindowsVault` (DPAPI, FFI), `MacVault` (`security -i`),
   `LinuxVault` (`secret-tool`), `MemoryVault` (tests).
 - `lib/src/storage/store.dart` — `Store` (SQLCipher open with a raw key, refuses a library without cipher; WAL,
@@ -51,6 +52,12 @@ one writer. Phase 2 built storage, keys, oplog, identities, audit and the proces
 - `lib/src/storage/migrations/m007_sealed.dart` — `account_keys`, `sealed_keys`, `sessions.sealed`.
 - `lib/src/storage/migrations/m008_money_methods.dart` — `money_methods` (`holder`, `document`, `account` in one sealed
   blob).
+- `lib/src/storage/migrations/m009_employees.dart` — `employments`, `sealed_fields` (one sealed value per row, to `hr`
+  and to the person), `activations` (a pending account's code, hashed).
+- `lib/src/domain/employees/employees.dart` — `Employees` (`list` shaped by permission, `former`, `detail` with the
+  E-4 measures and the sealed fields of `hr` or one's own, `invite` with a pending account and its code,
+  `reissueActivation`, `accept`, `acceptInvitations`, `draftEdit` / `draftOwn` checked and sealed before `save`),
+  `EmployeeEdit`, `EmployeeViewer`: `employees.md`.
 - `lib/src/domain/inventory/inventory.dart` — `Inventory`: tables (templates, primary flag), fields (dense positions,
   re-typing, width alone), records (checked cells, SKU, counter, text search), images; reads for the ledger
   (`product`, `primaryTable`): `inventory.md`.
@@ -85,7 +92,8 @@ one writer. Phase 2 built storage, keys, oplog, identities, audit and the proces
 - `lib/src/oplog/commands.dart` — `CommandLedger` (`commandId` idempotence, 30 days), `CommandReused`.
 - `lib/src/audit/audit_log.dart` — `AuditLog` (hash-chained, `append`, `verify`, `list`), `AuditEntry`, `AuditKinds`.
 - `lib/src/identity/passwords.dart` — `PasswordHasher` (Argon2id PHC strings, `needsRehash`, `parse`).
-- `lib/src/identity/accounts.dart` — `Accounts` (`createOwner`, `card` (the bootstrap's person), `verifyPassword` with
+- `lib/src/identity/accounts.dart` — `Accounts` (`createOwner`, `createPending` (an invitation's), `issueActivation`,
+  `checkActivation` + `activated` (S-8), `card` (the bootstrap's person), `verifyPassword` with
   lockout, `newPasswordHash` + `setPassword`, `usesPassword`, `pairingAccount` (salt and digest for the password way, a
   decoy for a login that can't sign in) + `pairingFailed`), `Account`, `AccountStatus`, `PasswordPairingAccount`.
 - `lib/src/identity/devices.dart` — `Devices` (`enroll`, `rename`, `revoke`, `touch`, `byFingerprint`, `master`, `codeFor`),
@@ -99,7 +107,7 @@ one writer. Phase 2 built storage, keys, oplog, identities, audit and the proces
 - `lib/src/net/server.dart` — `LanServer` (TLS 1.3 only; `/rpc`, `/pair`, `/f`, web bundle; revoked certificates and
   foreign `Origin`s refused before the upgrade; locked mode).
 - `lib/src/net/rpc.dart` — `RpcConnection` (hello first, gates, rate limit, session binding, event stream), `OpRule`
-  (`sealedArgs` kept out of the ledger's hash), `OpCall` (`write` = change + `commandId` answer in one transaction), `Gate`.
+  (`sealedArgs` kept out of the ledger's hash), `OpCall` (`write` = change + `commandId` answer in one transaction; `keep` leaves a secret shown once out of\n  the kept answer), `Gate`.
 - `lib/src/net/ops.dart` — `opRules`: every op this engine serves, with its gate and permission.
 - `lib/src/net/pairing.dart` — `PairingDesk` (the live ticket, SPAKE2 master side, 3 failures void it; the password way:
   `account` → `salt` → the account's digest as the secret, no ticket, a wrong one counts towards the lockout).
@@ -136,8 +144,11 @@ one writer. Phase 2 built storage, keys, oplog, identities, audit and the proces
 - `test/finance_test.dart` — money over the LAN: the catalogue offline, recording and voiding with their refusals and
   the audit, the history's order and totals, the summary beside the register, receivables, currencies, permissions.
 - `test/methods_test.dart` — the sealed keys (first holder, recovery wrap, refresh and restart, grants, password
-  change) and the accounts over the LAN: rails per country, sheets, nothing sealed in clear at rest (rows, ledger,
+  change, sealing to a scope or a person with no key in hand) and the accounts over the LAN: rails per country, sheets, nothing sealed in clear at rest (rows, ledger,
   oplog), refusals, edits, payments naming one, a session without the key, permissions.
+- `test/employees_test.dart` — the staff over the LAN: invitations and their code shown once, activation and its
+  refusals, the list shaped by permission, job edits and their checks, the E-4 measures, sealed pay and profile never
+  in clear (rows, oplog, ledger), the person's own reads and writes, the copy made for a person who had no key.
 - `test/export_test.dart` — the accounting export: the writers (amounts, CSV quoting and formula guard), both formats
   downloaded over the LAN and read back, the window, refusals, the audit, the file only its asker reads for an hour.
 - `test/import_test.dart` — importing: `.csv` / `.xlsx` reading, the typing rules, both steps over the LAN with their

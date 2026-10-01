@@ -27,6 +27,15 @@ abstract final class AuditKinds {
   static const paymentVoided = "money.payment_voided";
   static const methodRemoved = "money.method_removed";
 
+  /// An invited account set its password with its code (`session.md` S-8), or a wrong code was
+  /// typed for it.
+  static const accountActivated = "account.activated";
+  static const activationFailed = "auth.activation_failed";
+
+  /// Someone was invited (`employees.md` E-10), or a new activation code was issued (E-11).
+  static const employeeInvited = "employees.invited";
+  static const activationIssued = "employees.activation_issued";
+
   /// A scope's sealed key was made, by its first holder's sign in (plan §6.3).
   static const sealedKeyCreated = "sealed.key_created";
 

@@ -32,6 +32,7 @@ final Map<String, OpRule> opRules = {
   Ops.eventsUnsubscribe.name: const OpRule(_unsubscribe),
   Ops.authIdentify.name: const OpRule(_identify, gate: Gate.device),
   Ops.authSignIn.name: const OpRule(_signIn, gate: Gate.device),
+  Ops.authActivate.name: const OpRule(_activate, gate: Gate.device),
   Ops.authRefresh.name: const OpRule(_refresh, gate: Gate.device),
   Ops.authSignOut.name: const OpRule(_signOut),
   Ops.accountChangePassword.name: const OpRule(_changePassword),
@@ -101,6 +102,17 @@ final Map<String, OpRule> opRules = {
   Ops.moneyCurrenciesSave.name: const OpRule(_saveCurrency, permission: _manageCurrencies),
   Ops.moneyCurrenciesRemove.name: const OpRule(_removeCurrency, permission: _manageCurrencies),
   Ops.exportAccounting.name: const OpRule(_exportAccounting, permission: "finance.export"),
+  // Without `business.employees.view` a person still reads their own card and detail (E-1, E-3):
+  // the handlers shape the answer.
+  Ops.employeesList.name: const OpRule(_employees),
+  Ops.employeesFormer.name: const OpRule(_formerEmployees, permission: _employeesView),
+  Ops.employeesDetail.name: const OpRule(_employee),
+  Ops.employeesInvite.name: const OpRule(_invite, permission: _manageEmployees),
+  Ops.employeesReissueActivation.name: const OpRule(_reissueActivation, permission: _manageEmployees),
+  // Pay and the person's keys also need `view_personal`, which the handler asks for.
+  Ops.employeesEdit.name: const OpRule(_editEmployee, permission: _manageEmployees, sealedArgs: EmployeeFields.sealed),
+  Ops.employeesAccept.name: const OpRule(_acceptEmployment),
+  Ops.profileEdit.name: const OpRule(_editOwnProfile, sealedArgs: EmployeeFields.sealed),
 };
 
 const _businessView = "business.view";
@@ -111,6 +123,12 @@ const _posView = "pos.view";
 const _salesView = "sales.view";
 const _manageCurrencies = "finance.methods.manage_currencies";
 const _methodsView = "finance.methods.view";
+const _employeesView = "business.employees.view";
+const _viewPersonal = "business.employees.view_personal";
+
+/// The app's tree has no `edit` action under employees: `invite` is the one that maps to the
+/// cloud's `employees.manage`, which both inviting and editing a job need (`employees.md` E-12).
+const _manageEmployees = "business.employees.invite";
 
 /// `docs/app-areas.json`, area `local_server`.
 const _devicesPermission = "local_server.devices";
@@ -231,6 +249,35 @@ Future<Object?> _signIn(OpCall call) async {
   await call.engine.sealed.signedIn(account, password, sessionId: tokens.sessionId, refreshToken: tokens.refreshToken);
 
   return {...tokens.toJson(), "accountId": account.id, "mustChangePassword": account.mustChangePassword};
+}
+
+/// `auth.activate {login, code, password}` (S-8): the invited person's password, their account
+/// active, their invitations accepted, and a session, as `auth.signIn` answers it. Counts towards
+/// the device's sign-in rate.
+Future<Object?> _activate(OpCall call) async {
+  final engine = call.engine;
+  final device = call.device;
+
+  if (!call.connection.server.allowSignIn(device.id)) throw const EngineFailure(ErrorCodes.rateLimited, {"retryAfter": 60});
+
+  final password = call.text("password", max: 1024);
+  final (account, hash) = await engine.accounts.checkActivation(
+    call.text("login"),
+    call.text("code", max: 32),
+    password,
+    device: device.id,
+  );
+
+  engine.store.write((_) {
+    engine.accounts.activated(account.id, hash, device: device.id);
+    engine.employees.acceptInvitations(account.id, device: device.id);
+  });
+
+  final tokens = engine.sessions.open(accountId: account.id, deviceId: device.id);
+  await engine.sealed.signedIn(engine.accounts.byId(account.id)!, password,
+    sessionId: tokens.sessionId, refreshToken: tokens.refreshToken);
+
+  return {...tokens.toJson(), "accountId": account.id, "mustChangePassword": false};
 }
 
 /// `auth.refresh {refreshToken}` (S-21).
@@ -827,6 +874,70 @@ Future<Object?> _removeCurrency(OpCall call) async => call.write(() => call.engi
 /// `export.accounting {from, to, datasets, format}` (M-60 to M-65): the file is its asker's.
 Future<Object?> _exportAccounting(OpCall call) =>
   call.engine.accounting.run(call.args, actor: call.session.accountId, device: call.device.id);
+
+// ---------------------------------------------------------------- employees (`employees.md`)
+
+bool _allows(OpCall call, String permission) => Permissions.allows(call.connection.grants, permission);
+
+/// `employees.list` (E-1): everyone's with `business.employees.view`, else only the viewer's card.
+Future<Object?> _employees(OpCall call) async =>
+  call.engine.employees.list(viewer: call.session.accountId, all: _allows(call, _employeesView));
+
+Future<Object?> _formerEmployees(OpCall call) async => call.engine.employees.former();
+
+/// `employees.detail {id}` (E-3): anyone's with `business.employees.view`, else only one's own;
+/// the sealed fields with the `hr` key or the person's own.
+Future<Object?> _employee(OpCall call) {
+  final session = call.session.sessionId;
+  final sealed = call.engine.sealed;
+
+  return call.engine.employees.detail(call.text("id", max: 64), (
+    account: call.session.accountId,
+    session: session,
+    all: _allows(call, _employeesView),
+    personal: _allows(call, _viewPersonal),
+    hrKey: sealed.key(session, SealedScope.hr),
+    own: sealed.own(session),
+    device: call.device.id,
+  ));
+}
+
+/// `employees.invite` (E-10). The activation code is answered once: the ledger keeps the answer
+/// without it, so a replay doesn't show it again (`employees.reissueActivation` does).
+Future<Object?> _invite(OpCall call) async => call.write<Map<String, Object?>>(
+  () => call.engine.employees.invite(call.args, actor: call.session.accountId, device: call.device.id),
+  keep: (answer) => <String, Object?>{...answer, "activation": null},
+);
+
+/// `employees.reissueActivation {id}` (E-11).
+Future<Object?> _reissueActivation(OpCall call) async => call.write(
+  () => call.engine.employees.reissueActivation(call.text("id", max: 64),
+    actor: call.session.accountId, device: call.device.id),
+  keep: (_) => const <String, Object?>{},
+);
+
+/// `employees.edit {id, KEY: value}` (E-12 to E-16). Sealing is asynchronous, so the change is
+/// checked and sealed before the write.
+Future<Object?> _editEmployee(OpCall call) async {
+  final draft = await call.engine.employees.draftEdit(
+    call.args,
+    personal: _allows(call, _viewPersonal),
+    hrKey: call.engine.sealed.key(call.session.sessionId, SealedScope.hr),
+  );
+
+  return call.write(() => call.engine.employees.save(draft, actor: call.session.accountId, device: call.device.id));
+}
+
+/// `profile.edit {KEY: value}` (E-13): the session's own person, with no company permission.
+Future<Object?> _editOwnProfile(OpCall call) async {
+  final draft = await call.engine.employees.draftOwn(call.args, account: call.session.accountId);
+
+  return call.write(() => call.engine.employees.save(draft, actor: call.session.accountId, device: call.device.id));
+}
+
+/// `employees.accept {id}`: an invitation to an account that was already active (a rehire).
+Future<Object?> _acceptEmployment(OpCall call) async => call.write(() =>
+  call.engine.employees.accept(call.text("id", max: 64), account: call.session.accountId, device: call.device.id));
 
 /// `page` ≥ 1 and `size` from 1 to [max].
 (int, int) _paging(OpCall call, int max, int fallback) {

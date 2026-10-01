@@ -50,6 +50,12 @@ final class AccountKeyWrap {
 ///   token, which only the client holds (the engine keeps its hash). An engine restart doesn't
 ///   lock them, and the refresh that follows opens them again; a session that ends drops them.
 ///   A PIN session never has them (M-45).
+/// - A person's own private data is theirs to read and write without holding the scope
+///   (`employees.md` E-3, E-13). So a scope key also derives an X25519 pair whose public half is
+///   in `meta`, and such a value is sealed twice, needing no key at all: to the scope's public key
+///   ([sealToScope]) and to the person's ([sealToAccount]). The session keeps the account's
+///   private key next to its scope keys ([own]), which is why every password sign in opens the
+///   pair, holder or not.
 final class SealedKeys {
   SealedKeys(this._store, {Argon2Params params = Argon2Params.standard, DateTime Function()? now})
     : _params = params,
@@ -57,6 +63,9 @@ final class SealedKeys {
 
   static const recoveryHolder = "recovery";
   static const _recoveryMeta = "sealed_recovery";
+
+  /// The session copy's entry for the account's own private key, beside the scopes' names.
+  static const _ownEntry = "own";
 
   static final X25519 _x25519 = X25519();
 
@@ -67,9 +76,16 @@ final class SealedKeys {
   /// Session id → the scope keys it opened. In memory only.
   final Map<String, Map<SealedScope, Uint8List>> _open = {};
 
+  /// Session id → its account's private key (the X25519 seed). In memory only.
+  final Map<String, Uint8List> _own = {};
+
+  /// A scope's pair, derived from its key once (the key never changes).
+  final Map<SealedScope, SimpleKeyPair> _scopePairs = {};
+
   /// After a password sign in of [account] ([sessionId], [refreshToken]): opens its key pair,
   /// making it on its first sign in, and the scope keys its grants hold, making a scope's key
-  /// when nobody holds it yet.
+  /// when nobody holds it yet. Opening the pair costs an Argon2 on every sign in: the session
+  /// needs it to read the person's own sealed data.
   Future<void> signedIn(
     Account account,
     String password, {
@@ -80,11 +96,6 @@ final class SealedKeys {
       for (final scope in SealedScope.values)
         if (Permissions.allows(account.grants, scope.permission)) scope,
     ];
-    final hasPair = _store.db.select("SELECT 1 FROM account_keys WHERE account = ?", [account.id]).isNotEmpty;
-
-    // Someone who holds no scope only needs a pair to be granted one later: made once, not
-    // opened on every sign in (it costs an Argon2).
-    if (scopes.isEmpty && hasPair) return;
 
     final pair = await _pair(account.id, password);
     final keys = <SealedScope, Uint8List>{};
@@ -94,10 +105,11 @@ final class SealedKeys {
       if (key != null) keys[scope] = key;
     }
 
-    if (keys.isEmpty) return;
+    final own = Uint8List.fromList(await pair.extractPrivateKeyBytes());
 
     _open[sessionId] = keys;
-    await _keep(sessionId, refreshToken, keys);
+    _own[sessionId] = own;
+    await _keep(sessionId, refreshToken, keys, own);
   }
 
   /// After `auth.refresh` rotated [previous] into [next]: the session's keys move to the new
@@ -114,26 +126,34 @@ final class SealedKeys {
     if (sealed == null) return;
 
     final Map<SealedScope, Uint8List> keys;
+    final Uint8List? own;
     try {
       final clear = await Envelope.open(await _sessionKey(previous), sealed, context: _sessionContext(sessionId));
+      final entries = jsonDecode(utf8.decode(clear)) as Map<String, Object?>;
       keys = {
-        for (final MapEntry(:key, :value) in (jsonDecode(utf8.decode(clear)) as Map<String, Object?>).entries)
-          if (Permissions.allows(grants, SealedScope.values.byName(key).permission))
+        for (final MapEntry(:key, :value) in entries.entries)
+          if (key != _ownEntry && Permissions.allows(grants, SealedScope.values.byName(key).permission))
             SealedScope.values.byName(key): base64.decode(value as String),
       };
+      own = entries[_ownEntry] is String ? base64.decode(entries[_ownEntry]! as String) : null;
     } on EnvelopeError {
       _store.write((db) => db.execute("UPDATE sessions SET sealed = NULL WHERE id = ?", [sessionId]));
       return;
     }
 
-    if (keys.isEmpty) {
+    if (keys.isEmpty && own == null) {
       _open.remove(sessionId);
+      _own.remove(sessionId);
       _store.write((db) => db.execute("UPDATE sessions SET sealed = NULL WHERE id = ?", [sessionId]));
       return;
     }
 
     _open[sessionId] = keys;
-    await _keep(sessionId, next, keys);
+    if (own != null) _own[sessionId] = own;
+    for (final MapEntry(:key, :value) in keys.entries) {
+      await _scopePair(key, value);
+    }
+    await _keep(sessionId, next, keys, own);
   }
 
   /// The [scope] key [sessionId] opened, or null: not signed in with a password, not a holder,
@@ -142,11 +162,52 @@ final class SealedKeys {
     final open = _store.db.select("SELECT 1 FROM sessions WHERE id = ? AND ended IS NULL", [sessionId]).isNotEmpty;
     if (!open) {
       _open.remove(sessionId);
+      _own.remove(sessionId);
       return null;
     }
 
     return _open[sessionId]?[scope];
   }
+
+  /// The private key of [sessionId]'s account, or null like [key]: it opens what
+  /// [sealToAccount] sealed for that person.
+  Uint8List? own(String sessionId) {
+    final open = _store.db.select("SELECT 1 FROM sessions WHERE id = ? AND ended IS NULL", [sessionId]).isNotEmpty;
+    if (!open) {
+      _open.remove(sessionId);
+      _own.remove(sessionId);
+      return null;
+    }
+
+    return _own[sessionId];
+  }
+
+  /// [clear] (any JSON value) sealed for whoever holds [scope], with no key in hand: to the public
+  /// half of the pair the scope key derives. Null while nobody ever opened the scope, so it has
+  /// no pair yet (the owner's first sign in makes it).
+  Future<Uint8List?> sealToScope(SealedScope scope, Object? clear, {required String context}) async {
+    final row = _store.db.select("SELECT value FROM meta WHERE key = ?", [_publicMeta(scope)]).firstOrNull;
+    if (row == null) return null;
+
+    return _sealTo(SimplePublicKey(base64.decode(row["value"] as String), type: KeyPairType.x25519), clear, context);
+  }
+
+  /// [clear] sealed for the person [accountId] alone. Null while they have no pair (an account
+  /// nobody signed in to yet).
+  Future<Uint8List?> sealToAccount(String accountId, Object? clear, {required String context}) async {
+    final row = _store.db.select("SELECT public FROM account_keys WHERE account = ?", [accountId]).firstOrNull;
+    if (row == null) return null;
+
+    return _sealTo(SimplePublicKey(row["public"] as Uint8List, type: KeyPairType.x25519), clear, context);
+  }
+
+  /// What [sealToScope] sealed, opened with the scope's [key].
+  Future<Object?> openWithScope(SealedScope scope, Uint8List key, Uint8List sealed, {required String context}) async =>
+    _openWith(await _scopePair(scope, key), sealed, context);
+
+  /// What [sealToAccount] sealed, opened with the account's private key ([own]).
+  Future<Object?> openWithOwn(Uint8List own, Uint8List sealed, {required String context}) async =>
+    _openWith(await _x25519.newKeyPairFromSeed(own), sealed, context);
 
   /// First half of a password change (`session.md` S-9): [accountId]'s private key sealed under
   /// [password], or null when the account has no key pair yet (it gets one at its next sign in).
@@ -173,7 +234,10 @@ final class SealedKeys {
     for (final keys in _open.values) {
       keys.values.forEach(wipe);
     }
+    _own.values.forEach(wipe);
     _open.clear();
+    _own.clear();
+    _scopePairs.clear();
   }
 
   /// Stores the public key [recovery] derives, so scope keys are wrapped to it too. At setup and
@@ -253,6 +317,7 @@ final class SealedKeys {
     if (mine != null) {
       final key = await _unwrap(scope, accountId, pair, mine["wrap"] as Uint8List);
       if (rows.every((row) => row["holder"] != recoveryHolder)) await _wrapForRecovery(scope, key);
+      await _scopePair(scope, key);
 
       return key;
     }
@@ -280,8 +345,57 @@ final class SealedKeys {
       return true;
     });
 
-    // Another holder's sign in made it first: read theirs.
-    return made ? key : _scopeKey(scope, accountId, pair);
+    if (!made) {
+      // Another holder's sign in made it first: read theirs.
+      wipe(key);
+      return _scopeKey(scope, accountId, pair);
+    }
+
+    await _scopePair(scope, key);
+    return key;
+  }
+
+  /// [scope]'s pair, derived from its [key]; its public half is stored the first time, which on a
+  /// master whose scope key predates it is the next sign in or refresh of a holder.
+  Future<SimpleKeyPair> _scopePair(SealedScope scope, Uint8List key) async {
+    final known = _scopePairs[scope];
+    if (known != null) return known;
+
+    final pair = await _x25519.newKeyPairFromSeed(await subkey(key, "lyra/sealed/scope-pair/v1"));
+    final public = await pair.extractPublicKey();
+
+    _store.write((db) => db.execute(
+      "INSERT OR IGNORE INTO meta (key, value) VALUES (?, ?)",
+      [_publicMeta(scope), base64.encode(public.bytes)],
+    ));
+
+    return _scopePairs[scope] = pair;
+  }
+
+  /// [clear] as JSON to [public]: an ephemeral agreement as in [_wrap], under its own label.
+  /// Stored as `ephemeral public (32) | envelope`.
+  static Future<Uint8List> _sealTo(SimplePublicKey public, Object? clear, String context) async {
+    final ephemeral = await _x25519.newKeyPair();
+    final kek = await _agreed(ephemeral, public, "lyra/sealed/data/v1");
+    try {
+      final box = await Envelope.seal(kek, utf8.encode(jsonEncode(clear)), context: _dataContext(context));
+      final mine = await ephemeral.extractPublicKey();
+
+      return Uint8List.fromList([...mine.bytes, ...box]);
+    } finally {
+      wipe(kek);
+    }
+  }
+
+  static Future<Object?> _openWith(SimpleKeyPair pair, Uint8List sealed, String context) async {
+    if (sealed.length < 32) throw const EnvelopeError();
+
+    final kek = await _agreed(pair, SimplePublicKey(sealed.sublist(0, 32), type: KeyPairType.x25519), "lyra/sealed/data/v1");
+    try {
+      return jsonDecode(utf8.decode(await Envelope.open(kek, sealed.sublist(32), context: _dataContext(context))));
+    } finally {
+      wipe(kek);
+    }
   }
 
   /// A master set up before the sealed keys has no recovery wrap until a recovery stores the
@@ -303,8 +417,11 @@ final class SealedKeys {
     return row == null ? null : SimplePublicKey(base64.decode(row["value"] as String), type: KeyPairType.x25519);
   }
 
-  Future<void> _keep(String sessionId, String refreshToken, Map<SealedScope, Uint8List> keys) async {
-    final clear = utf8.encode(jsonEncode({for (final MapEntry(:key, :value) in keys.entries) key.name: base64.encode(value)}));
+  Future<void> _keep(String sessionId, String refreshToken, Map<SealedScope, Uint8List> keys, Uint8List? own) async {
+    final clear = utf8.encode(jsonEncode({
+      for (final MapEntry(:key, :value) in keys.entries) key.name: base64.encode(value),
+      if (own != null) _ownEntry: base64.encode(own),
+    }));
     final sealed = await Envelope.seal(await _sessionKey(refreshToken), clear, context: _sessionContext(sessionId));
 
     _store.write((db) => db.execute("UPDATE sessions SET sealed = ? WHERE id = ? AND ended IS NULL", [sealed, sessionId]));
@@ -342,7 +459,7 @@ final class SealedKeys {
   /// AES-GCM. Stored as `ephemeral public (32) | envelope`.
   static Future<Uint8List> _wrap(SealedScope scope, String holder, SimplePublicKey public, List<int> key) async {
     final ephemeral = await _x25519.newKeyPair();
-    final kek = await _agreed(ephemeral, public);
+    final kek = await _agreed(ephemeral, public, "lyra/sealed/wrap/v1");
     try {
       final box = await Envelope.seal(kek, key, context: _wrapContext(scope, holder));
       final mine = await ephemeral.extractPublicKey();
@@ -356,7 +473,7 @@ final class SealedKeys {
   static Future<Uint8List> _unwrap(SealedScope scope, String holder, SimpleKeyPair pair, Uint8List wrap) async {
     if (wrap.length < 32) throw const EnvelopeError();
 
-    final kek = await _agreed(pair, SimplePublicKey(wrap.sublist(0, 32), type: KeyPairType.x25519));
+    final kek = await _agreed(pair, SimplePublicKey(wrap.sublist(0, 32), type: KeyPairType.x25519), "lyra/sealed/wrap/v1");
     try {
       return await Envelope.open(kek, wrap.sublist(32), context: _wrapContext(scope, holder));
     } finally {
@@ -364,10 +481,10 @@ final class SealedKeys {
     }
   }
 
-  static Future<Uint8List> _agreed(SimpleKeyPair pair, SimplePublicKey other) async {
+  static Future<Uint8List> _agreed(SimpleKeyPair pair, SimplePublicKey other, String label) async {
     final shared = await _x25519.sharedSecretKey(keyPair: pair, remotePublicKey: other);
 
-    return subkey(await shared.extractBytes(), "lyra/sealed/wrap/v1");
+    return subkey(await shared.extractBytes(), label);
   }
 
   static Future<SimpleKeyPair> _recoveryPair(RecoveryKey recovery) async =>
@@ -381,4 +498,8 @@ final class SealedKeys {
   static String _wrapContext(SealedScope scope, String holder) => "lyra/sealed/${scope.name}/$holder";
 
   static String _sessionContext(String sessionId) => "lyra/sealed/session/$sessionId";
+
+  static String _dataContext(String context) => "lyra/sealed/data/$context";
+
+  static String _publicMeta(SealedScope scope) => "sealed_public_${scope.name}";
 }

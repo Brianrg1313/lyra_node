@@ -1,10 +1,12 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:crypto/crypto.dart' show sha256;
 import 'package:lyra_protocol/lyra_protocol.dart';
 import 'package:sqlite3/sqlite3.dart';
 
 import '../audit/audit_log.dart';
+import '../crypto/secrets.dart';
 import '../failure.dart';
 import '../ids.dart';
 import '../oplog/hlc.dart';
@@ -55,8 +57,8 @@ final class Account {
   static const ownerGrant = "*";
 }
 
-/// Local accounts: creation of the owner at setup and password checks with lockout. Invitations,
-/// activation, PINs and resets arrive with the ops that use them (phase 3 and `employees.md`).
+/// Local accounts: the owner at setup, invited people (`pending` until activated) and password
+/// checks with lockout. PINs and resets arrive with the ops that use them.
 final class Accounts {
   Accounts(
     this._store,
@@ -73,6 +75,13 @@ final class Accounts {
   /// `session.md` S-2. The bundled list of common passwords is checked too once the catalogues
   /// ship with the app (plan §7.5).
   static const minPasswordLength = 10;
+
+  /// `session.md` S-8.
+  static const activationLife = Duration(hours: 72);
+
+  /// Wrong codes in a row that void an activation code: 8 digits are guessable at the device's
+  /// sign-in rate otherwise. The admin issues a new one.
+  static const maxActivationFailures = 5;
 
   final Store _store;
   final HlcClock _clock;
@@ -140,6 +149,123 @@ final class Accounts {
       );
 
       return byId(id)!;
+    });
+  }
+
+  /// An invited person's account (`session.md` S-7): `pending`, with no password until its
+  /// activation code is used (S-8). Called inside the invitation's write. Without [username] one
+  /// is made from [email]'s local part, numbered when taken.
+  String createPending({
+    String? username,
+    String? email,
+    String firstName = "",
+    String lastName = "",
+    String? actor,
+    String? device,
+  }) {
+    email = email?.trim().toLowerCase();
+    username = username?.trim().toLowerCase() ?? _usernameFor(email ?? "");
+    _checkUsername(username);
+
+    final taken = _db.select(
+      "SELECT 1 FROM accounts WHERE lower(username) = ?1 OR (?2 IS NOT NULL AND lower(email) = ?2)",
+      [username, email],
+    );
+    if (taken.isNotEmpty) throw const EngineFailure("account_exists");
+
+    final id = newId();
+    final stamp = _clock.tick();
+
+    _db.execute(
+      "INSERT INTO accounts (id, username, email, first_name, last_name, status, created, created_hlc, updated_hlc, "
+      "origin) VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)",
+      [id, username, email, firstName.trim(), lastName.trim(), _now().toUtc().toIso8601String(), stamp.pack(),
+        stamp.pack(), device],
+    );
+    Oplog(_db).append(
+      hlc: stamp,
+      entity: "account",
+      entityId: id,
+      kind: "created",
+      payload: {"username": username, "email": email, "firstName": firstName.trim(), "lastName": lastName.trim()},
+      actor: actor,
+      device: device,
+    );
+    AuditLog(_db, now: _now).append(AuditKinds.accountCreated, actor: actor, device: device, data: {
+      "account": id,
+      "grants": const <String>[],
+    });
+
+    return id;
+  }
+
+  /// A new activation code for the pending [accountId] (S-8), voiding a live one: the code in
+  /// clear, which leaves the engine only in this answer, and when it expires. Inside a write.
+  ({String code, DateTime expires}) issueActivation(String accountId) {
+    final status = _db.select("SELECT status FROM accounts WHERE id = ?", [accountId]).firstOrNull?["status"];
+    if (status != AccountStatus.pending.name) throw const EngineFailure("not_pending");
+
+    final code = _digits(8);
+    final expires = _now().toUtc().add(activationLife);
+
+    _db.execute(
+      "INSERT INTO activations (account, code, expires, failures) VALUES (?, ?, ?, 0) "
+      "ON CONFLICT (account) DO UPDATE SET code = excluded.code, expires = excluded.expires, failures = 0",
+      [accountId, _activationHash(accountId, code), expires.toIso8601String()],
+    );
+
+    return (code: code, expires: expires);
+  }
+
+  /// `auth.activate`'s checks (S-8): [login]'s live code against [code], then the new password's
+  /// rules. Answers the account and the password's hash for [activated], which the caller writes
+  /// with whatever else activating does. An unknown login, one that isn't pending, a voided code
+  /// and a wrong one all answer `invalid_code`; [maxActivationFailures] wrong ones void it.
+  Future<(Account, String)> checkActivation(String login, String code, String password, {String? device}) async {
+    final row = _db.select(
+      "SELECT a.id, v.code, v.expires FROM accounts a JOIN activations v ON v.account = a.id "
+      "WHERE a.deleted = 0 AND a.status = 'pending' AND (lower(a.username) = lower(?1) OR lower(a.email) = lower(?1))",
+      [login.trim()],
+    ).firstOrNull;
+
+    if (row == null) throw const EngineFailure("invalid_code");
+
+    final id = row["id"] as String;
+    final typed = code.trim();
+    final right = RegExp(r"^\d{8}$").hasMatch(typed) &&
+      constantTimeEquals(utf8.encode(_activationHash(id, typed)), utf8.encode(row["code"] as String));
+
+    if (!right) {
+      _store.write((db) {
+        db.execute("UPDATE activations SET failures = failures + 1 WHERE account = ?", [id]);
+        db.execute("DELETE FROM activations WHERE account = ? AND failures >= ?", [id, maxActivationFailures]);
+        AuditLog(db, now: _now).append(AuditKinds.activationFailed, device: device, data: {"account": id});
+      });
+      throw const EngineFailure("invalid_code");
+    }
+
+    if (DateTime.parse(row["expires"] as String).isBefore(_now())) throw const EngineFailure("code_expired");
+
+    _checkPassword(password);
+
+    return (byId(id)!, await _hasher.hash(password));
+  }
+
+  /// Second half of activating [accountId] (S-8), inside the caller's write: the password, the
+  /// account `active`, the code spent.
+  void activated(String accountId, String hash, {String? device}) {
+    final now = _now().toUtc().toIso8601String();
+
+    _db.execute(
+      "UPDATE accounts SET password = ?, status = 'active', failed_attempts = 0, locked_until = NULL, last_sign_in = ?, "
+      "updated_hlc = ? WHERE id = ? AND status = 'pending'",
+      [hash, now, _clock.tick().pack(), accountId],
+    );
+    if (_db.updatedRows != 1) throw const EngineFailure("invalid_code");
+
+    _db.execute("DELETE FROM activations WHERE account = ?", [accountId]);
+    AuditLog(_db, now: _now).append(AuditKinds.accountActivated, actor: accountId, device: device, data: {
+      "account": accountId,
     });
   }
 
@@ -330,6 +456,36 @@ final class Accounts {
         grant["permission"] as String,
     },
   );
+
+  /// A free username from an e-mail's local part (S-1): its allowed characters, starting with a
+  /// letter, then `2`, `3`… when taken.
+  String _usernameFor(String email) {
+    var base = email.split("@").first.replaceAll(RegExp(r"[^a-z0-9._-]"), "");
+    if (!RegExp(r"^[a-z]").hasMatch(base)) base = "u$base";
+    if (base.length < 3) base = "${base}user";
+    if (base.length > 28) base = base.substring(0, 28);
+
+    for (var n = 1; ; n++) {
+      final candidate = n == 1 ? base : "$base$n";
+      if (_db.select("SELECT 1 FROM accounts WHERE lower(username) = ?", [candidate]).isEmpty) return candidate;
+    }
+  }
+
+  /// [length] random decimal digits, without the bias of a plain modulo.
+  static String _digits(int length) {
+    final buffer = StringBuffer();
+
+    while (buffer.length < length) {
+      final byte = randomBytes(1).first;
+      if (byte < 250) buffer.write(byte % 10);
+    }
+
+    return buffer.toString();
+  }
+
+  /// What `activations.code` keeps: the code bound to its account, never the code itself.
+  static String _activationHash(String accountId, String code) =>
+    sha256.convert(utf8.encode("lyra/activation/v1 $accountId $code")).toString();
 
   /// `session.md` S-1: 3 to 32 of `a-z 0-9 . _ -`, starting with a letter.
   static void _checkUsername(String username) {

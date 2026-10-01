@@ -12,6 +12,7 @@ export 'src/crypto/secrets.dart' show Argon2Params;
 export 'src/crypto/vault.dart';
 export 'src/domain/business/business.dart';
 export 'src/domain/business/zones.dart';
+export 'src/domain/employees/employees.dart';
 export 'src/domain/inventory/cells.dart';
 export 'src/domain/inventory/inventory.dart';
 export 'src/domain/inventory/spreadsheet.dart';

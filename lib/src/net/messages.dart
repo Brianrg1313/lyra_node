@@ -82,6 +82,17 @@ abstract final class Messages {
     "too_many_methods": "A company can keep up to 40 payment accounts. Remove one first.",
     "invalid_range": "The start date must be on or before the end date.",
     "too_many_rows": "That period has more than a million rows. Pick a shorter one.",
+    "invalid_code": "That code isn't valid. Ask whoever invited you for a new one.",
+    "code_expired": "That code expired. Ask whoever invited you for a new one.",
+    "account_exists": "Someone already uses that username or e-mail.",
+    "already_employed": "That person already works here.",
+    "already_invited": "That person is already invited.",
+    "not_pending": "That person already activated their account.",
+    "not_invited": "There is no invitation to accept.",
+    "employment_closed": "That job is over: it can't be edited.",
+    "profile_locked": "Personal data can only be edited while the person works here.",
+    "manager_cycle": "That person reports, directly or not, to this one.",
+    "invalid_dates": "The start date must be on or before the end date.",
   };
 
   /// Codes whose client must go somewhere (`ErrorActions`).

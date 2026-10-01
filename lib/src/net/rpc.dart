@@ -92,7 +92,10 @@ final class OpCall {
   /// Runs a write op's change and keeps its answer under its `commandId`, **in one
   /// transaction** (the domain's own writes join it). If the same command already ran, [body]
   /// doesn't run again and the first answer comes back.
-  T write<T extends Object?>(T Function() body) => engine.store.write((db) {
+  ///
+  /// [keep] is what the ledger keeps instead, for an answer that carries a secret shown once (an
+  /// activation code): a replay then answers without it.
+  T write<T extends Object?>(T Function() body, {Object? Function(T answer)? keep}) => engine.store.write((db) {
     final ledger = CommandLedger(db);
     final commandId = request.commandId!;
     final hashed = rule.hashed(args);
@@ -101,7 +104,7 @@ final class OpCall {
     if (kept.found) return kept.answer as T;
 
     final answer = body();
-    ledger.record(commandId, request.op, hashed, answer, engine.now());
+    ledger.record(commandId, request.op, hashed, keep == null ? answer : keep(answer), engine.now());
 
     return answer;
   });

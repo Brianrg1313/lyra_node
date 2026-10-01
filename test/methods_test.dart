@@ -73,6 +73,27 @@ void main() {
         isNull);
     });
 
+    test('sealed to a scope or a person with no key in hand; opened by the holder or that person, also after a '
+        'restart', () async {
+      final session = await signIn(owner.password);
+      final account = engine.sessions.accountOf(session.session)!;
+      final toScope = (await engine.sealed.sealToScope(SealedScope.hr, {"salary": "10"}, context: "x"))!;
+      final toPerson = (await engine.sealed.sealToAccount(account, "mine", context: "y"))!;
+
+      expect(await engine.sealed.openWithScope(SealedScope.hr, engine.sealed.key(session.session, SealedScope.hr)!,
+        toScope, context: "x"), {"salary": "10"});
+      expect(await engine.sealed.openWithOwn(engine.sealed.own(session.session)!, toPerson, context: "y"), "mine");
+      await expectLater(engine.sealed.openWithOwn(engine.sealed.own(session.session)!, toPerson, context: "z"),
+        throwsA(isA<EnvelopeError>()), reason: "the context binds it to its row");
+
+      final restarted = SealedKeys(engine.store, params: fastParams);
+      final rotated = engine.sessions.refresh(session.refresh, deviceId: engine.devices.master!.id);
+      await restarted.refreshed(session.session, grants: {"*"}, previous: session.refresh, next: rotated.refreshToken);
+      expect(await restarted.openWithOwn(restarted.own(session.session)!, toPerson, context: "y"), "mine");
+
+      expect(await engine.sealed.sealToAccount("nobody", "x", context: "y"), isNull, reason: "no key pair yet");
+    });
+
     test('a refresh keeps only the scopes the grants still hold', () async {
       final session = await signIn(owner.password);
       final rotated = engine.sessions.refresh(session.refresh, deviceId: engine.devices.master!.id);
