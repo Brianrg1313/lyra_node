@@ -10,7 +10,15 @@ import '../storage/store.dart';
 
 /// One event of the stream, with who may receive it.
 final class StoredEvent {
-  const StoredEvent({required this.seq, required this.name, required this.data, this.accounts, this.permissions});
+  const StoredEvent({
+    required this.seq,
+    required this.name,
+    required this.data,
+    this.accounts,
+    this.permissions,
+    this.owner,
+    this.overrides,
+  });
 
   final int seq;
   final String name;
@@ -22,11 +30,17 @@ final class StoredEvent {
   /// Only sessions holding one of these permissions receive it.
   final List<String>? permissions;
 
+  /// The account the data belongs to: other sessions receive it only holding [overrides]
+  /// (`sale/progress` and `sales.view_all`, `sales.md` SA-11).
+  final String? owner;
+  final String? overrides;
+
   /// Whether a session of [accountId] with [grants] may see it (`protocol-v1.md` §5: a client
   /// never receives an event about data it can't read).
   bool visibleTo(String accountId, Set<String> grants) =>
     (accounts == null || accounts!.contains(accountId)) &&
-    (permissions == null || permissions!.any((permission) => Permissions.allows(grants, permission)));
+    (permissions == null || permissions!.any((permission) => Permissions.allows(grants, permission))) &&
+    (owner == null || owner == accountId || (overrides != null && Permissions.allows(grants, overrides!)));
 
   RpcEvent get frame => RpcEvent(event: name, seq: seq, data: data);
 }
@@ -54,7 +68,8 @@ final class EventLog {
 
   int get _lastSeq => _store.db.select("SELECT coalesce(max(seq), 0) AS seq FROM events").first["seq"] as int;
 
-  /// Appends one event inside a write, for sessions holding [permission] or any of [anyOf].
+  /// Appends one event inside a write, for sessions holding [permission] or any of [anyOf]; with
+  /// [owner], only its sessions and those holding [overrides].
   static void append(
     Database db,
     String name,
@@ -63,11 +78,18 @@ final class EventLog {
     List<String>? accounts,
     String? permission,
     List<String>? anyOf,
+    String? owner,
+    String? overrides,
   }) {
     final permissions = [?permission, ...?anyOf];
-    final audience = accounts == null && permissions.isEmpty
+    final audience = accounts == null && permissions.isEmpty && owner == null
       ? null
-      : jsonEncode({"accounts": ?accounts, if (permissions.isNotEmpty) "anyOf": permissions});
+      : jsonEncode({
+          "accounts": ?accounts,
+          if (permissions.isNotEmpty) "anyOf": permissions,
+          "owner": ?owner,
+          "overrides": ?overrides,
+        });
 
     db.execute(
       "INSERT INTO events (at, name, data, audience) VALUES (?, ?, ?, ?)",
@@ -129,6 +151,8 @@ final class EventLog {
       // Before the POS release an audience named one `permission`.
       permissions: (audience?["anyOf"] as List?)?.cast<String>() ??
         (audience?["permission"] is String ? [audience!["permission"] as String] : null),
+      owner: audience?["owner"] as String?,
+      overrides: audience?["overrides"] as String?,
     );
   }
 }

@@ -12,6 +12,7 @@ import '../../storage/store.dart';
 import '../business/business.dart';
 import '../business/zones.dart';
 import '../inventory/inventory.dart';
+import '../sales/sales.dart';
 import '../stock/stock.dart';
 import 'money.dart';
 
@@ -202,8 +203,10 @@ final class Pos {
       Oplog(db).append(hlc: stamp, entity: "pos_invoice", entityId: id, kind: "created",
         payload: {"ticket": ticket, "tax": rate}, actor: seller, device: device);
 
-      final invoice = _invoice(_row(id));
+      final row = _row(id);
+      final invoice = _invoice(row);
       _announce(db, Events.invoiceOpened, invoice);
+      _progress(db, row);
 
       return invoice;
     });
@@ -218,6 +221,7 @@ final class Pos {
     String? device,
   }) => _store.write((db) {
     final invoice = _writable(id);
+    final total = _invoice(invoice)["total"];
     final productId = args["productId"];
     final lineId = args["lineId"];
     final concept = args["concept"];
@@ -306,8 +310,11 @@ final class Pos {
       payload: {"productId": ?productId, "lineId": ?lineId, "concept": ?concept, "qty": after < 0 ? 0 : after, "tax": ?rate},
       actor: actor, device: device);
 
-    final answer = _invoice(_row(id));
+    final row = _row(id);
+    final answer = _invoice(row);
     _announce(db, Events.invoiceUpdated, answer);
+    // The board only cares when the sale is worth something else (`sales.md`, events).
+    if (answer["total"] != total) _progress(db, row);
 
     return {"invoice": answer};
   });
@@ -371,8 +378,10 @@ final class Pos {
     Oplog(db).append(hlc: stamp, entity: "pos_invoice", entityId: id, kind: "closed",
       payload: {"method": method}, actor: actor, device: device);
 
-    final invoice = _invoice(_row(id));
+    final row = _row(id);
+    final invoice = _invoice(row);
     _announce(db, Events.invoiceClosed, invoice);
+    _progress(db, row);
 
     return invoice;
   });
@@ -392,7 +401,9 @@ final class Pos {
     );
     Oplog(db).append(hlc: stamp, entity: "pos_invoice", entityId: id, kind: "cancelled", payload: const {},
       actor: actor, device: device);
-    _announce(db, Events.invoiceCancelled, _invoice(_row(id)));
+    final row = _row(id);
+    _announce(db, Events.invoiceCancelled, _invoice(row));
+    _progress(db, row);
   });
 
   /// `pos.invoices.list {mine?, size?}` (POS-45): open invoices, oldest first; [device] limits
@@ -407,6 +418,9 @@ final class Pos {
 
     return {"invoices": [for (final row in rows) _invoice(row)]};
   }
+
+  /// [row] as the sales board reads it: every figure computed from its lines.
+  Map<String, Object?> document(Row row) => _invoice(row);
 
   // ---------------------------------------------------------------- internals
 
@@ -574,6 +588,9 @@ final class Pos {
     "units": invoice["units"],
     "total": invoice["total"],
   }, at: _now(), anyOf: audience);
+
+  void _progress(Database db, Row invoice) =>
+    Sales.announce(db, invoice, language: _business.language, at: _now());
 
   /// An optional text argument, trimmed; null when blank.
   static String? _text(Object? raw, String field, int max) {

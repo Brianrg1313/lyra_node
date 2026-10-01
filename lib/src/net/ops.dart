@@ -10,6 +10,7 @@ import '../identity/permissions.dart';
 import '../audit/audit_log.dart';
 import '../domain/inventory/inventory.dart';
 import '../domain/inventory/spreadsheet.dart';
+import '../domain/sales/sales.dart';
 import 'files.dart';
 import 'rpc.dart';
 
@@ -74,6 +75,10 @@ final Map<String, OpRule> opRules = {
   Ops.posInvoicesClose.name: const OpRule(_closeInvoice, permission: "pos.checkout"),
   Ops.posInvoicesCancel.name: const OpRule(_cancelInvoice, permission: "pos.cancel_ticket"),
   Ops.posInvoicesList.name: const OpRule(_openInvoices, permission: _posView),
+  Ops.salesList.name: const OpRule(_sales, permission: _salesView),
+  Ops.salesCatalog.name: const OpRule(_salesCatalog, permission: _salesView),
+  Ops.salesDetail.name: const OpRule(_saleDetail, permission: _salesView),
+  Ops.salesFulfil.name: const OpRule(_fulfil, permission: "sales.fulfil"),
 };
 
 const _businessView = "business.view";
@@ -81,6 +86,7 @@ const _inventoryView = "inventory.view";
 const _editColumns = "inventory.edit_columns";
 const _editRecords = "inventory.edit_records";
 const _posView = "pos.view";
+const _salesView = "sales.view";
 
 /// `docs/app-areas.json`, area `local_server`.
 const _devicesPermission = "local_server.devices";
@@ -585,4 +591,65 @@ Future<Object?> _openInvoices(OpCall call) async {
   if (mine != null && mine is! bool) throw const EngineFailure(ErrorCodes.invalidField, {"field": "mine"});
 
   return call.engine.pos.list(device: mine == true ? call.device.id : null, size: _int(call, "size", 20));
+}
+
+// ---------------------------------------------------------------- sales (`sales.md`)
+
+/// `sales.list {section, stage?, channel?, mine?, page?, size?}` (SA-10 to SA-13): a stage names
+/// its own section, whose view permission the session must hold.
+Future<Object?> _sales(OpCall call) async {
+  final stage = call.args["stage"] == null ? null : call.text("stage", max: 32);
+  final kind = stage == null ? null : SaleStages.kinds[stage];
+  if (stage != null && kind == null) throw const EngineFailure(ErrorCodes.invalidField, {"field": "stage"});
+
+  final section = kind?.$1 ?? call.text("section", max: 16);
+  if (section != SaleStages.process && section != SaleStages.done) {
+    throw const EngineFailure(ErrorCodes.invalidField, {"field": "section"});
+  }
+  if (!Permissions.allows(call.connection.grants, "sales.$section.view")) {
+    throw const EngineFailure(ErrorCodes.forbidden);
+  }
+
+  final page = _int(call, "page", 1);
+  final size = _int(call, "size", 30);
+  if (page < 1) throw const EngineFailure(ErrorCodes.invalidField, {"field": "page"});
+  if (size < 1 || size > PosLimits.maxPage) throw const EngineFailure(ErrorCodes.invalidField, {"field": "size"});
+
+  return call.engine.sales.list(
+    section: section,
+    stage: stage,
+    channel: call.args["channel"] == null ? null : call.text("channel", max: 32),
+    seller: _bool(call, "mine") ? call.session.accountId : _seller(call),
+    page: page,
+    size: size,
+  );
+}
+
+Future<Object?> _salesCatalog(OpCall call) async => call.engine.sales.catalog();
+
+/// `sales.detail {reference}` (SA-30): a ticket code or a row id.
+Future<Object?> _saleDetail(OpCall call) async =>
+  call.engine.sales.detail(call.text("reference", max: 64), seller: _seller(call));
+
+/// `sales.fulfil {id, mode?, state?, note?}` (SA-20 to SA-24).
+Future<Object?> _fulfil(OpCall call) async => call.write(() => call.engine.sales.fulfil(
+  call.text("id"),
+  mode: call.args["mode"],
+  state: call.args["state"],
+  note: call.args["note"],
+  seller: _seller(call),
+  actor: call.session.accountId,
+  device: call.device.id,
+));
+
+/// Without `sales.view_all`, a person only reaches the sales they sold, whatever the client sends
+/// (SA-11: the master is the gate).
+String? _seller(OpCall call) =>
+  Permissions.allows(call.connection.grants, Sales.viewAll) ? null : call.session.accountId;
+
+bool _bool(OpCall call, String name) {
+  final value = call.args[name];
+  if (value != null && value is! bool) throw EngineFailure(ErrorCodes.invalidField, {"field": name});
+
+  return value == true;
 }

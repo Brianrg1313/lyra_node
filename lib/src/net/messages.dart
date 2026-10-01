@@ -58,6 +58,10 @@ abstract final class Messages {
     "invoice_cancelled": "This ticket was cancelled.",
     "empty_invoice": "The ticket has nothing on it to charge.",
     "unknown_method": "That payment method isn't accepted here.",
+    "sale_not_found": "There is no sale with that reference.",
+    "not_a_ticket": "Only a charged sale has a handover.",
+    "invalid_state": "That handover step doesn't exist for that way of handing over.",
+    "nothing_to_change": "Say how the sale is handed over, or how far that got.",
   };
 
   /// Codes whose client must go somewhere (`ErrorActions`).

@@ -13,7 +13,7 @@ one writer. Phase 2 built storage, keys, oplog, identities, audit and the proces
 - `lib/lyra_node.dart` — barrel (for `bin/` and tests).
 - `lib/src/engine.dart` — `Engine` (`setup` with the owner and the company, `open`, `recover`, `close`, `controlKey`,
   `enrollMaster`, `prepareTransport`; holds `sessions`, `events`, `authority`, `files`, `business`, `inventory`,
-  `stock`, `pos`), `OwnerDraft`,
+  `stock`, `pos`, `sales`), `OwnerDraft`,
   `DeviceDraft`, `EnrolledDevice`,
   `engineVersion`, `minAppVersion`.
 - `lib/src/failure.dart` — `EngineFailure` (a rule's refusal: stable `code` + `data`, no message).
@@ -56,6 +56,8 @@ one writer. Phase 2 built storage, keys, oplog, identities, audit and the proces
 - `lib/src/domain/pos/pos.dart` — `Pos` (`summary`, `methods`, `catalog` by field type and cursor, `open` with the
   device's code, `line`, `close`, `cancel`, `list`; every figure computed from frozen lines): `pos.md`.
 - `lib/src/domain/pos/money.dart` — `Money` (minor units, percents as text, half away from zero, in integers).
+- `lib/src/domain/sales/sales.dart` — `Sales` (`catalog`, `list` paged in SQL by the measured stage, `row`, `detail`,
+  `fulfil`; `measure` and `announce` of `sale/progress`, which `Pos` calls on its writes): `sales.md`.
 - `lib/src/oplog/hlc.dart` — `Hlc` (packed, sortable), `HlcClock` (never backwards, `maxDrift`), `ClockDrift`.
 - `lib/src/oplog/oplog.dart` — `Oplog` (`append` inside the write, `since`, `lastSeq`, `lastHlc`), `OplogEntry`.
 - `lib/src/oplog/commands.dart` — `CommandLedger` (`commandId` idempotence, 30 days), `CommandReused`.
@@ -77,8 +79,8 @@ one writer. Phase 2 built storage, keys, oplog, identities, audit and the proces
   `OpCall` (`write` = change + `commandId` answer in one transaction), `Gate`.
 - `lib/src/net/ops.dart` — `opRules`: every op this engine serves, with its gate and permission.
 - `lib/src/net/pairing.dart` — `PairingDesk` (the live ticket, SPAKE2 master side, 3 failures void it).
-- `lib/src/net/events.dart` — `EventLog` (append inside a write for a permission or `anyOf` several, `publish` after,
-  replay window, `resync_required`), `StoredEvent`.
+- `lib/src/net/events.dart` — `EventLog` (append inside a write for a permission or `anyOf` several, or for an
+  `owner` and those holding `overrides`; `publish` after, replay window, `resync_required`), `StoredEvent`.
 - `lib/src/net/files.dart` — `FileStore` (sealed uploads, type sniffing, a sealed 320 px thumbnail of each image made off
   the isolate, `get` with `size` (a product image also for `pos.view`), `claim` / `release` by a record, `once` /
   `discard` for an import, orphan sweep),
@@ -105,6 +107,8 @@ one writer. Phase 2 built storage, keys, oplog, identities, audit and the proces
   positions, cells and SKUs, search, images and thumbnails, movements, holds, replays, events, history, summary.
 - `test/pos_test.dart` — money and zones; the counter over the LAN: catalogue by type, codes per device, lines and
   holds, refusals and their permissions, close and cancel, untracked products, I-4, events to a cashier.
+- `test/sales_test.dart` — the sales board over the LAN: catalogue, sections and order, the handover and its
+  refusals, the detail of an invoice and of a ticket, `sales.view_all` on the list, detail, write and notices.
 - `test/import_test.dart` — importing: `.csv` / `.xlsx` reading, the typing rules, both steps over the LAN with their
   events and opening balances, normalizing, limits.
 - `test/discovery_test.dart` — mDNS answers (and a live lookup, tag `network`).

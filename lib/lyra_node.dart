@@ -17,6 +17,7 @@ export 'src/domain/inventory/spreadsheet.dart';
 export 'src/domain/inventory/typing.dart';
 export 'src/domain/pos/money.dart';
 export 'src/domain/pos/pos.dart';
+export 'src/domain/sales/sales.dart';
 export 'src/domain/stock/stock.dart';
 export 'src/engine.dart';
 export 'src/failure.dart';
