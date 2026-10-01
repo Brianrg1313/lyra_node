@@ -736,12 +736,15 @@ final class Employees {
     }
   }
 
-  /// E-14: an active employment of the company, not [employment] itself nor anyone under it.
+  /// E-14: an invited or active employment of the company, not [employment] itself nor anyone
+  /// under it.
   String? _manager(String? manager, String employment) {
     if (manager == null) return null;
 
-    final row = _db.select("SELECT state FROM employments WHERE id = ?", [manager]).firstOrNull;
-    if (row == null || row["state"] != "active") throw const EngineFailure(ErrorCodes.invalidField, {"field": "MANAGER_ID"});
+    final state = _db.select("SELECT state FROM employments WHERE id = ?", [manager]).firstOrNull?["state"];
+    if (state != "active" && state != "invited") {
+      throw const EngineFailure(ErrorCodes.invalidField, {"field": "MANAGER_ID"});
+    }
 
     final seen = <String>{};
     for (String? up = manager; up != null && seen.add(up);) {

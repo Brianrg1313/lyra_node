@@ -202,6 +202,11 @@ void main() {
       await expectRefusal(edit(barista, {"COLOR": "blue"}), ErrorCodes.invalidField);
       await expectRefusal(edit(boss, {"MANAGER_ID": barista}), "manager_cycle");
       await expectRefusal(edit(boss, {"MANAGER_ID": boss}), "manager_cycle");
+
+      // An invitation counts too: it is in the list the app offers.
+      final invited = await invite({"email": "lead@example.com", "jobTitle": "Lead"});
+      await edit(boss, {"MANAGER_ID": invited["id"]});
+      await expectRefusal(edit(boss, {"MANAGER_ID": "nobody"}), ErrorCodes.invalidField);
     });
 
     test('the person\'s keys need an active job (E-12)', () async {
