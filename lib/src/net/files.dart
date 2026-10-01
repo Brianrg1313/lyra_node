@@ -17,12 +17,19 @@ enum FilePurpose {
   logo(5 << 20, _images),
   productImage(10 << 20, _images),
   import(20 << 20, {"text/csv", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}),
-  picture(5 << 20, _images);
+  picture(5 << 20, _images),
+
+  /// A file the master writes for its asker (`export.accounting`, M-60): never uploaded, read
+  /// back by its owner only, for [FileStore.orphanAge].
+  export(0, {"application/zip", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
 
   const FilePurpose(this.maxBytes, this.types);
 
   final int maxBytes;
   final Set<String> types;
+
+  /// Whether `PUT /f` takes it.
+  bool get uploadable => this != export;
 
   /// The `X-Lyra-Purpose` header value.
   String get header => switch (this) {
@@ -32,7 +39,7 @@ enum FilePurpose {
 
   static FilePurpose? byHeader(String? value) {
     for (final purpose in values) {
-      if (purpose.header == value) return purpose;
+      if (purpose.uploadable && purpose.header == value) return purpose;
     }
 
     return null;
@@ -106,6 +113,31 @@ final class FileStore {
     return id;
   }
 
+  /// Keeps [bytes] the master made itself for [owner] (an export): sealed like an upload, never
+  /// referenced, so only [owner] reads it and the sweep deletes it after [orphanAge]. Answers the
+  /// id.
+  Future<String> keep(FilePurpose purpose, Uint8List bytes, {required String contentType, required String owner}) async {
+    if (purpose.uploadable || !purpose.types.contains(contentType)) throw ArgumentError.value(purpose, "purpose");
+
+    final id = newId();
+    final file = File(p.join(_folder, id));
+
+    Directory(_folder).createSync(recursive: true);
+    file.writeAsBytesSync(await Envelope.seal(_key, bytes, context: "lyra/file/$id"), flush: true);
+
+    try {
+      _store.write((db) => db.execute(
+        "INSERT INTO files (id, purpose, content_type, size, owner, created) VALUES (?, ?, ?, ?, ?, ?)",
+        [id, purpose.header, contentType, bytes.length, owner, _now().toUtc().toIso8601String()],
+      ));
+    } catch (_) {
+      file.deleteSync();
+      rethrow;
+    }
+
+    return id;
+  }
+
   /// A referenced file's readers besides its permission's, by purpose: a till draws the product
   /// pictures without seeing the inventory (`pos.md` POS-1). Read here and not stored, so the
   /// images claimed before the POS release are covered too.
@@ -127,8 +159,11 @@ final class FileStore {
       ? row["owner"] == account
       : Permissions.allows(grants, permission) || also != null && Permissions.allows(grants, also);
     final file = File(p.join(_folder, id));
+    // An export is valid for [orphanAge] (M-60), not until the next sweep happens to run.
+    final expired = row["purpose"] == FilePurpose.export.header &&
+      DateTime.parse(row["created"] as String).add(orphanAge).isBefore(_now());
 
-    if (!allowed || !file.existsSync()) throw const EngineFailure("not_found");
+    if (!allowed || expired || !file.existsSync()) throw const EngineFailure("not_found");
 
     final small = File(p.join(_folder, "$id@$thumbnailWidth"));
     if (size != null && size <= thumbnailWidth && small.existsSync()) {

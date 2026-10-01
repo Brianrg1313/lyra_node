@@ -32,6 +32,9 @@ abstract final class AuditKinds {
 
   /// Sealed fields were read (plan §6.6): which scope, what and how many rows.
   static const sealedRead = "sealed.read";
+
+  /// An accounting export was made (M-65): the window, the datasets, the format and the rows.
+  static const accountingExported = "export.accounting";
 }
 
 final class AuditEntry {

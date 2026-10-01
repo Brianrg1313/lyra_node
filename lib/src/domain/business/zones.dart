@@ -33,4 +33,28 @@ abstract final class Zones {
 
     return (start.toUtc(), end.toUtc());
   }
+
+  /// The UTC instant the calendar day [year]-[month]-[day] starts at in [zone].
+  static DateTime startOf(String zone, int year, int month, int day) {
+    _load();
+
+    return tz.TZDateTime(_location(zone), year, month, day).toUtc();
+  }
+
+  /// [instant] as ISO 8601 in [zone]'s wall clock, to the second, with its offset
+  /// (`2026-09-01T10:00:00-04:00`): what an accountant's software reads as the local time.
+  static String local(String zone, DateTime instant) {
+    _load();
+
+    final at = tz.TZDateTime.from(instant, _location(zone));
+    String two(int value) => value.toString().padLeft(2, "0");
+    final offset = at.timeZoneOffset;
+    final minutes = offset.inMinutes.abs();
+
+    return "${at.year.toString().padLeft(4, "0")}-${two(at.month)}-${two(at.day)}"
+      "T${two(at.hour)}:${two(at.minute)}:${two(at.second)}"
+      "${offset.isNegative ? "-" : "+"}${two(minutes ~/ 60)}:${two(minutes % 60)}";
+  }
+
+  static tz.Location _location(String zone) => zone == "UTC" ? tz.UTC : tz.getLocation(zone);
 }

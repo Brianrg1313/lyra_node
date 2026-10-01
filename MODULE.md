@@ -3,7 +3,7 @@
 **Path** `E:/andromeda/frontend/packages/lyra_node` (own git repo, pure Dart, no Flutter)
 **Role** The engine that runs on the master (`lyra/app/docs/plan-offline-lan.md` §3, §8): one company, encrypted,
 one writer. Phase 2 built storage, keys, oplog, identities, audit and the process lifecycle; phase 3 the LAN server
-(TLS, pairing, RPC, events, files, mDNS); phase 4 adds the domains one per release (business, inventory and stock, import, POS, sales, finance and its accounts so far). Rules come from `lyra/app/docs/offline/specs/*`, never from backend code (plan principle 1).
+(TLS, pairing, RPC, events, files, mDNS); phase 4 adds the domains one per release (business, inventory and stock, import, POS, sales, finance with its accounts and the accounting export so far). Rules come from `lyra/app/docs/offline/specs/*`, never from backend code (plan principle 1).
 **Used by** `lyra/app` through the executable only (`LocalServerService`), never as a Dart import.
 
 ## Files
@@ -13,7 +13,7 @@ one writer. Phase 2 built storage, keys, oplog, identities, audit and the proces
 - `lib/lyra_node.dart` — barrel (for `bin/` and tests).
 - `lib/src/engine.dart` — `Engine` (`setup` with the owner and the company, `open`, `recover`, `close`, `controlKey`,
   `enrollMaster`, `prepareTransport`; holds `sessions`, `events`, `authority`, `files`, `business`, `inventory`,
-  `stock`, `pos`, `sales`, `finance`, `methods`, `sealed`), `OwnerDraft`,
+  `stock`, `pos`, `sales`, `finance`, `methods`, `accounting`, `sealed`), `OwnerDraft`,
   `DeviceDraft`, `EnrolledDevice`,
   `engineVersion`, `minAppVersion`.
 - `lib/src/failure.dart` — `EngineFailure` (a rule's refusal: stable `code` + `data`, no message).
@@ -41,7 +41,8 @@ one writer. Phase 2 built storage, keys, oplog, identities, audit and the proces
 - `lib/src/domain/business/business.dart` — `CompanyDraft` (setup, checked before anything is written), `Business`
   (`create`, `profile`, `summary`, `edit` one key, `setLogo`, `site`, `editSite`, `timezone`, `language`, `currency`,
   `decimals`): `business.md`.
-- `lib/src/domain/business/zones.dart` — `Zones` (the IANA database compiled in: `known`, `dayOf` a zone's day in UTC).
+- `lib/src/domain/business/zones.dart` — `Zones` (the IANA database compiled in: `known`, `dayOf` a zone's day in UTC,
+  `startOf` a calendar day, `local` an instant as ISO with the zone's offset).
 - `lib/src/storage/migrations/m004_inventory.dart` — `inventory_tables`, `inventory_fields`, `inventory_records` (cells as
   one JSON object), `stock_movements`, `stock_balances`, `stock_holds`.
 - `lib/src/storage/migrations/m005_pos.dart` — `pos_invoices`, `pos_lines` (a line's id is its hold's), `pos_series`.
@@ -72,6 +73,11 @@ one writer. Phase 2 built storage, keys, oplog, identities, audit and the proces
   custom rates; `credit` off; a payment names an account): `money.md`.
 - `lib/src/domain/money/methods.dart` — `MoneyMethods` (`rails`, `list` (sealed, audited), `draftCreate` / `draftEdit`
   checked and sealed before `save`, `remove`), `MethodDraft`: `money.md` money.method.
+- `lib/src/domain/export/accounting.dart` — `Accounting` (`run`: `export.accounting`, M-60 to M-65; the window in the
+  company's zone, the row ceiling, the datasets and their `*Columns`, the file kept for its asker, the audit entry).
+- `lib/src/domain/export/writers.dart` — `ExportFormat` (`csv` zipped, `xlsx`), `Dataset`, `Decimal` (minor units as
+  text), `CsvWriter` (BOM, separator by decimal mark, formula guard), `Workbook` (one sheet per dataset, inline text).
+- `docs/export.md` — the export's columns, window and formats: the contract with the accounting software.
 - `lib/src/domain/money/rails.dart` — `Rails` (the cloud's rails, requirement sheets and bank, document and network
   lists as of 2026-09; `offered`, `available`, `options`, `sheet`, `format`, `document`), `RailField`.
 - `lib/src/oplog/hlc.dart` — `Hlc` (packed, sortable), `HlcClock` (never backwards, `maxDrift`), `ClockDrift`.
@@ -99,7 +105,7 @@ one writer. Phase 2 built storage, keys, oplog, identities, audit and the proces
   `owner` and those holding `overrides`; `publish` after, replay window, `resync_required`), `StoredEvent`.
 - `lib/src/net/files.dart` — `FileStore` (sealed uploads, type sniffing, a sealed 320 px thumbnail of each image made off
   the isolate, `get` with `size` (a product image also for `pos.view`), `claim` / `release` by a record, `once` /
-  `discard` for an import, orphan sweep),
+  `discard` for an import, `keep` an export for its asker (expires after `orphanAge`), orphan sweep),
   `FilePurpose`.
 - `lib/src/net/messages.dart` — `Messages` (refusal code → `RpcError` with message and action).
 - `lib/src/net/web_bundle.dart` — `WebBundle` (static web build, CSP).
@@ -130,6 +136,8 @@ one writer. Phase 2 built storage, keys, oplog, identities, audit and the proces
 - `test/methods_test.dart` — the sealed keys (first holder, recovery wrap, refresh and restart, grants, password
   change) and the accounts over the LAN: rails per country, sheets, nothing sealed in clear at rest (rows, ledger,
   oplog), refusals, edits, payments naming one, a session without the key, permissions.
+- `test/export_test.dart` — the accounting export: the writers (amounts, CSV quoting and formula guard), both formats
+  downloaded over the LAN and read back, the window, refusals, the audit, the file only its asker reads for an hour.
 - `test/import_test.dart` — importing: `.csv` / `.xlsx` reading, the typing rules, both steps over the LAN with their
   events and opening balances, normalizing, limits.
 - `test/discovery_test.dart` — mDNS answers (and a live lookup, tag `network`).

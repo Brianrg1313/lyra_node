@@ -16,6 +16,8 @@ export 'src/domain/inventory/cells.dart';
 export 'src/domain/inventory/inventory.dart';
 export 'src/domain/inventory/spreadsheet.dart';
 export 'src/domain/inventory/typing.dart';
+export 'src/domain/export/accounting.dart';
+export 'src/domain/export/writers.dart';
 export 'src/domain/money/finance.dart';
 export 'src/domain/money/methods.dart';
 export 'src/domain/money/rails.dart';

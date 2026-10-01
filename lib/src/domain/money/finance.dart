@@ -211,7 +211,7 @@ final class Finance {
     for (final ticket in tickets.values) {
       if (ticket.credit) {
         creditCount += 1;
-        creditOwed += ticket.total - _collected(ticket.id).clamp(0, ticket.total);
+        creditOwed += ticket.total - collected(ticket.id).clamp(0, ticket.total);
         continue;
       }
 
@@ -312,8 +312,8 @@ final class Finance {
       for (final ticket in _tickets("json_extract(i.payment, '\$.credit') = 1", const []).values)
         if (ticket.credit)
           () {
-            final collected = _collected(ticket.id);
-            return (ticket: ticket, collected: collected, outstanding: (ticket.total - collected).clamp(0, ticket.total));
+            final paid = collected(ticket.id);
+            return (ticket: ticket, collected: paid, outstanding: (ticket.total - paid).clamp(0, ticket.total));
           }(),
     ]
       ..retainWhere((row) => !open || row.outstanding > 0)
@@ -434,7 +434,7 @@ final class Finance {
 
   /// What a payment's account is called: the company's label, else its rail's name. A removed
   /// account still reads (M-44).
-  String? _accountLabel(String? id) {
+  String? accountLabel(String? id) {
     if (id == null) return null;
 
     final row = _db.select("SELECT code, label FROM money_methods WHERE id = ?", [id]).firstOrNull;
@@ -480,7 +480,7 @@ final class Finance {
       "method": row["method"],
       "methodName": Settlements.name(row["method"] as String, language),
       if (!flat) "accountId": row["account_id"],
-      "account": _accountLabel(row["account_id"] as String?),
+      "account": accountLabel(row["account_id"] as String?),
       "reference": row["reference"],
       "counterpart": flat ? (counterpart?["name"] ?? counterpart?["contact"]) : counterpart,
       "ticket": code,
@@ -514,7 +514,7 @@ final class Finance {
       final ticket = _tickets("i.id = ?", [id])[id]!;
       if (!ticket.credit) throw const EngineFailure("not_credit");
 
-      final outstanding = (ticket.total - _collected(id)).clamp(0, ticket.total);
+      final outstanding = (ticket.total - collected(id)).clamp(0, ticket.total);
       if (amount > outstanding) throw EngineFailure("exceeds_outstanding", {"outstanding": outstanding});
     }
 
@@ -551,7 +551,7 @@ final class Finance {
   }
 
   /// What the recorded settlements of ticket [id] add up to (M-30).
-  int _collected(String id) => _db.select(
+  int collected(String id) => _db.select(
     "SELECT coalesce(sum(amount), 0) AS n FROM money_payments WHERE ticket_id = ? AND status = 'recorded' "
     "AND concept IN (${List.filled(_settling.length, "?").join(", ")})",
     [id, ..._settling],

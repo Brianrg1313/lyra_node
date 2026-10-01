@@ -80,6 +80,8 @@ abstract final class Messages {
     "invalid_option": "Pick one of the options offered for that field.",
     "invalid_fee": "The commission must be more than zero, and below 100 as a percent.",
     "too_many_methods": "A company can keep up to 40 payment accounts. Remove one first.",
+    "invalid_range": "The start date must be on or before the end date.",
+    "too_many_rows": "That period has more than a million rows. Pick a shorter one.",
   };
 
   /// Codes whose client must go somewhere (`ErrorActions`).

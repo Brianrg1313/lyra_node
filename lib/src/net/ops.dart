@@ -97,6 +97,7 @@ final Map<String, OpRule> opRules = {
   Ops.moneyCurrenciesGet.name: const OpRule(_currencies, permission: _methodsView),
   Ops.moneyCurrenciesSave.name: const OpRule(_saveCurrency, permission: _manageCurrencies),
   Ops.moneyCurrenciesRemove.name: const OpRule(_removeCurrency, permission: _manageCurrencies),
+  Ops.exportAccounting.name: const OpRule(_exportAccounting, permission: "finance.export"),
 };
 
 const _businessView = "business.view";
@@ -802,6 +803,10 @@ Future<Object?> _removeCurrency(OpCall call) async => call.write(() => call.engi
   actor: call.session.accountId,
   device: call.device.id,
 ));
+
+/// `export.accounting {from, to, datasets, format}` (M-60 to M-65): the file is its asker's.
+Future<Object?> _exportAccounting(OpCall call) =>
+  call.engine.accounting.run(call.args, actor: call.session.accountId, device: call.device.id);
 
 /// `page` ≥ 1 and `size` from 1 to [max].
 (int, int) _paging(OpCall call, int max, int fallback) {

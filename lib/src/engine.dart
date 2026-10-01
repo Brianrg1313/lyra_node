@@ -11,6 +11,7 @@ import 'crypto/sealed.dart';
 import 'crypto/secrets.dart';
 import 'crypto/vault.dart';
 import 'domain/business/business.dart';
+import 'domain/export/accounting.dart';
 import 'domain/inventory/inventory.dart';
 import 'domain/money/finance.dart';
 import 'domain/money/methods.dart';
@@ -151,6 +152,8 @@ final class Engine {
   late final Finance finance = Finance(store, clock, business, now: _now);
 
   late final MoneyMethods methods = MoneyMethods(store, clock, business, now: _now);
+
+  late final Accounting accounting = Accounting(store, business, finance, files, now: _now);
 
   /// The keys of the sealed fields each session opened (plan §6.3): one instance for the engine's
   /// life, like [sessions].
