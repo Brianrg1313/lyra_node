@@ -131,6 +131,10 @@ final class Engine {
 
   String get instanceId => _keyring.instanceId;
 
+  /// Keys the decoy salts of the password way of pairing (`Accounts.pairingAccount`): the same
+  /// for one login across restarts, unguessable from outside.
+  late final Future<Uint8List> pairingDecoyKey = _keyring.derive("lyra/pairing/decoy/v1");
+
   Oplog get oplog => Oplog(store.db);
 
   AuditLog get audit => AuditLog(store.db, now: _now);

@@ -84,9 +84,10 @@ one writer. Phase 2 built storage, keys, oplog, identities, audit and the proces
 - `lib/src/oplog/oplog.dart` — `Oplog` (`append` inside the write, `since`, `lastSeq`, `lastHlc`), `OplogEntry`.
 - `lib/src/oplog/commands.dart` — `CommandLedger` (`commandId` idempotence, 30 days), `CommandReused`.
 - `lib/src/audit/audit_log.dart` — `AuditLog` (hash-chained, `append`, `verify`, `list`), `AuditEntry`, `AuditKinds`.
-- `lib/src/identity/passwords.dart` — `PasswordHasher` (Argon2id PHC strings, `needsRehash`).
+- `lib/src/identity/passwords.dart` — `PasswordHasher` (Argon2id PHC strings, `needsRehash`, `parse`).
 - `lib/src/identity/accounts.dart` — `Accounts` (`createOwner`, `card` (the bootstrap's person), `verifyPassword` with
-  lockout, `newPasswordHash` + `setPassword`, `usesPassword`), `Account`, `AccountStatus`.
+  lockout, `newPasswordHash` + `setPassword`, `usesPassword`, `pairingAccount` (salt and digest for the password way, a
+  decoy for a login that can't sign in) + `pairingFailed`), `Account`, `AccountStatus`, `PasswordPairingAccount`.
 - `lib/src/identity/devices.dart` — `Devices` (`enroll`, `rename`, `revoke`, `touch`, `byFingerprint`, `master`, `codeFor`),
   `Device`, `DeviceKind` (`master`, `native`, `web`).
 - `lib/src/identity/sessions.dart` — `Sessions` (access tokens in memory, rotated refresh tokens, reuse ends the session),
@@ -100,7 +101,8 @@ one writer. Phase 2 built storage, keys, oplog, identities, audit and the proces
 - `lib/src/net/rpc.dart` — `RpcConnection` (hello first, gates, rate limit, session binding, event stream), `OpRule`
   (`sealedArgs` kept out of the ledger's hash), `OpCall` (`write` = change + `commandId` answer in one transaction), `Gate`.
 - `lib/src/net/ops.dart` — `opRules`: every op this engine serves, with its gate and permission.
-- `lib/src/net/pairing.dart` — `PairingDesk` (the live ticket, SPAKE2 master side, 3 failures void it).
+- `lib/src/net/pairing.dart` — `PairingDesk` (the live ticket, SPAKE2 master side, 3 failures void it; the password way:
+  `account` → `salt` → the account's digest as the secret, no ticket, a wrong one counts towards the lockout).
 - `lib/src/net/events.dart` — `EventLog` (append inside a write for a permission or `anyOf` several, or for an
   `owner` and those holding `overrides`; `publish` after, replay window, `resync_required`), `StoredEvent`.
 - `lib/src/net/files.dart` — `FileStore` (sealed uploads, type sniffing, a sealed 320 px thumbnail of each image made off

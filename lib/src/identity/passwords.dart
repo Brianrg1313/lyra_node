@@ -21,7 +21,7 @@ final class PasswordHasher {
 
   /// Whether [password] matches [phc]. A string that isn't one of ours never matches.
   Future<bool> verify(String password, String phc) async {
-    final parsed = _parse(phc);
+    final parsed = parse(phc);
     if (parsed == null) return false;
 
     final digest = await argon2id(password, parsed.salt, parsed.params, length: parsed.hash.length);
@@ -29,9 +29,10 @@ final class PasswordHasher {
     return constantTimeEquals(digest, parsed.hash);
   }
 
-  bool needsRehash(String phc) => _parse(phc)?.params.isWeakerThan(params) ?? true;
+  bool needsRehash(String phc) => parse(phc)?.params.isWeakerThan(params) ?? true;
 
-  static ({Argon2Params params, List<int> salt, List<int> hash})? _parse(String phc) {
+  /// The parts of [phc], or null when it isn't one of ours.
+  static ({Argon2Params params, List<int> salt, List<int> hash})? parse(String phc) {
     final match = RegExp(
       r"^\$argon2id\$v=19\$m=(\d+),t=(\d+),p=(\d+)\$([A-Za-z0-9+/]+)\$([A-Za-z0-9+/]+)$",
     ).firstMatch(phc);

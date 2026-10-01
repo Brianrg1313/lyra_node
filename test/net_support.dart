@@ -121,8 +121,8 @@ final class TestMaster {
     return await client.call(Ops.pairingStart) as Map<String, Object?>;
   }
 
-  /// Pairs a new native device with the code, as its app would.
-  Future<LanIdentity> pairNative(String name, {String? code, PairingOffer? offer}) async {
+  /// Pairs a new native device with the code, the QR or a password, as its app would.
+  Future<LanIdentity> pairNative(String name, {String? code, PairingOffer? offer, PasswordPairing? password}) async {
     final key = EcKeyPair.generate();
     final channel = await connectPairing("127.0.0.1", port);
     addTearDown(channel.close);
@@ -133,6 +133,7 @@ final class TestMaster {
       signer: LocalDeviceSigner(key),
       code: offer == null ? code : null,
       offer: offer,
+      password: password,
     );
 
     return LanIdentity(

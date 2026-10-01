@@ -154,6 +154,63 @@ void main() {
       expect(master.openEngine.audit.list().where((e) => e.kind == AuditKinds.pairingFailed), hasLength(3));
     });
 
+    test('with the password: no code, the account pairs its own device and signs in', () async {
+      final master = await TestMaster.start();
+      final laptop = await master.pairNative(
+        "Laptop",
+        password: PasswordPairing(login: owner.username, password: owner.password),
+      );
+
+      final (client, _) = await master.signIn(laptop);
+      final devices = await client.call(Ops.devicesList) as List;
+      final paired = devices.firstWhere((d) => (d as Map)["name"] == "Laptop") as Map;
+
+      expect(paired["pairedBy"], isNotNull);
+    });
+
+    test('a wrong password fails like a wrong code and counts towards the lockout (S-4)', () async {
+      final master = await TestMaster.start();
+      final wrong = PasswordPairing(login: owner.username, password: "not the password");
+
+      for (var i = 0; i < Accounts.maxFailures; i++) {
+        await expectLater(
+          master.pairNative("Guess $i", password: wrong),
+          throwsA(isA<PairingFailure>().having((f) => f.code, "code", Pairing.failed)),
+        );
+      }
+
+      await expectLater(
+        master.pairNative("Late", password: PasswordPairing(login: owner.username, password: owner.password)),
+        throwsA(isA<PairingFailure>().having((f) => f.code, "code", Pairing.accountLocked)),
+      );
+      expect(master.openEngine.audit.list().where((e) => e.kind == AuditKinds.accountLocked), hasLength(1));
+    });
+
+    test('an unknown login gets a steady decoy salt and fails like a wrong password', () async {
+      final master = await TestMaster.start();
+
+      Future<Map<String, Object?>> saltOf(String login) async {
+        final channel = await connectPairing("127.0.0.1", master.port);
+        addTearDown(channel.close);
+        await channel.receive();
+        channel.send({"step": "account", "login": login});
+        return channel.receive();
+      }
+
+      final known = await saltOf(owner.username);
+      final unknown = await saltOf("nobody");
+
+      expect(unknown.keys, unorderedEquals(known.keys));
+      expect(unknown["step"], "salt");
+      expect((await saltOf("NOBODY"))["salt"], unknown["salt"]);
+      expect(unknown["salt"], isNot(known["salt"]));
+
+      await expectLater(
+        master.pairNative("Ghost", password: const PasswordPairing(login: "nobody", password: "anything at all")),
+        throwsA(isA<PairingFailure>().having((f) => f.code, "code", Pairing.failed)),
+      );
+    });
+
     test('only the master app opens a pairing', () async {
       final master = await TestMaster.start();
       final phone = await master.pairNative("Phone", code: (await master.openPairing())["code"] as String);

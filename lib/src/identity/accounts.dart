@@ -1,3 +1,6 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
 import 'package:lyra_protocol/lyra_protocol.dart';
 import 'package:sqlite3/sqlite3.dart';
 
@@ -10,6 +13,16 @@ import '../storage/store.dart';
 import 'passwords.dart';
 
 enum AccountStatus { pending, active, disabled }
+
+/// [Accounts.pairingAccount]: [id] and [secret] are null for a login that can't pair.
+final class PasswordPairingAccount {
+  const PasswordPairingAccount({required this.salt, this.id, this.secret, this.lockedUntil});
+
+  final String? id;
+  final PasswordSalt salt;
+  final String? secret;
+  final DateTime? lockedUntil;
+}
 
 /// A person who can sign in to this master (`session.md` session.account). The hashes never
 /// leave [Accounts].
@@ -225,6 +238,51 @@ final class Accounts {
       "account": accountId,
     });
   });
+
+  /// What the password way of pairing needs for [login] (`protocol-v1.md` §3): how its password
+  /// was hashed, and the digest, which is the pairing secret. The digest never leaves the engine.
+  ///
+  /// A login that can't sign in (unknown, pending, disabled) gets a decoy salt derived from
+  /// [decoyKey], the same for every ask, and no secret, so the exchange fails like a wrong
+  /// password and nothing tells whether the account exists. A locked one says so, as its sign in
+  /// does (S-4).
+  PasswordPairingAccount pairingAccount(String login, List<int> decoyKey) {
+    login = login.trim().toLowerCase();
+    final rows = _db.select(
+      "SELECT * FROM accounts WHERE deleted = 0 AND (lower(username) = ?1 OR lower(email) = ?1)",
+      [login],
+    );
+    final row = rows.isEmpty ? null : rows.first;
+    final parsed = row?["password"] is String ? PasswordHasher.parse(row!["password"] as String) : null;
+
+    if (row == null || parsed == null || row["status"] != AccountStatus.active.name) {
+      return PasswordPairingAccount(salt: PasswordSalt(
+        salt: Hashes.hmacSha256(decoyKey, utf8.encode("lyra/pairing/decoy/v1 $login")).sublist(0, 16),
+        memory: _hasher.params.memory,
+        iterations: _hasher.params.iterations,
+        parallelism: _hasher.params.parallelism,
+        length: 32,
+      ));
+    }
+
+    final lockedUntil = row["locked_until"] == null ? null : DateTime.parse(row["locked_until"] as String);
+
+    return PasswordPairingAccount(
+      id: row["id"] as String,
+      salt: PasswordSalt(
+        salt: Uint8List.fromList(parsed.salt),
+        memory: parsed.params.memory,
+        iterations: parsed.params.iterations,
+        parallelism: parsed.params.parallelism,
+        length: parsed.hash.length,
+      ),
+      secret: base64.encode(parsed.hash),
+      lockedUntil: lockedUntil != null && lockedUntil.isAfter(_now()) ? lockedUntil : null,
+    );
+  }
+
+  /// A wrong password in a pairing counts towards [id]'s lockout like a wrong sign in (S-4).
+  void pairingFailed(String id) => _recordFailure(id, null);
 
   /// Whether [login] could sign in with a password (`auth.identify`). Unknown logins answer
   /// true too, so the answer doesn't tell who has an account.

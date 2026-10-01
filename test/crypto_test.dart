@@ -1,7 +1,9 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:lyra_node/lyra_node.dart';
 import 'package:lyra_node/src/crypto/secrets.dart';
+import 'package:lyra_protocol/lyra_protocol.dart' show PasswordSalt;
 import 'package:test/test.dart';
 
 import 'support.dart';
@@ -94,6 +96,22 @@ void main() {
 
       expect(fastHasher.needsRehash(hash), isFalse);
       expect(const PasswordHasher().needsRehash(hash), isTrue);
+    });
+
+    test('a device derives the stored digest: the password way of pairing (two Argon2 libraries)', () async {
+      for (final password in ["correct horse battery", "contraseña ñandú 🔑"]) {
+        final parsed = PasswordHasher.parse(await fastHasher.hash(password))!;
+        final salt = PasswordSalt(
+          salt: Uint8List.fromList(parsed.salt),
+          memory: parsed.params.memory,
+          iterations: parsed.params.iterations,
+          parallelism: parsed.params.parallelism,
+          length: parsed.hash.length,
+        );
+
+        expect(salt.secretOf(password), base64.encode(parsed.hash));
+        expect(salt.secretOf("$password!"), isNot(base64.encode(parsed.hash)));
+      }
     });
   });
 }
