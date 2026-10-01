@@ -36,11 +36,12 @@ Future<({String instanceId, RecoveryKey recovery, EnrolledDevice? device})> setU
   String? passphrase,
   DeviceDraft? device,
   DateTime Function()? now,
+  bool withCompany = true,
 }) => Engine.setup(
   paths: paths,
   vault: vault,
   owner: owner,
-  company: company,
+  company: withCompany ? company : null,
   device: device,
   passphrase: passphrase,
   params: fastParams,

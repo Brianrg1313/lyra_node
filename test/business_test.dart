@@ -43,6 +43,63 @@ void main() {
     });
   });
 
+  group('business.create', () {
+    late TestMaster bare;
+    late RpcClient owner;
+    late Map<String, Object?> ownerTokens;
+
+    setUp(() async {
+      bare = await TestMaster.start(withCompany: false);
+      (owner, ownerTokens) = await bare.signIn();
+    });
+
+    Future<Object?> create(RpcClient client, Map<String, Object?> args) =>
+      client.call(Ops.businessCreate, args: args, commandId: const Uuid().v7());
+
+    const draft = {"name": " Lovelace Café ", "country": "ve", "currency": "usd", "language": "es", "activity": "food"};
+
+    test("a master set up without its company answers none and the welcome's task (S-30, S-31)", () async {
+      final answer = await owner.call(Ops.sessionBootstrap) as Map<String, Object?>;
+
+      expect(answer["businesses"], isEmpty);
+      expect(answer["permissions"], isEmpty);
+      expect(answer["tasks"], [{"key": "business.none"}]);
+      expect((answer["deployment"] as Map)["timezone"], isNull);
+    });
+
+    test('the owner creates it once; the bootstrap then answers it (B-1)', () async {
+      final created = await create(owner, draft) as Map;
+
+      expect((created["name"], created["currency"], created["activity"]), ("Lovelace Café", "USD", "FOOD"));
+
+      final answer = await owner.call(Ops.sessionBootstrap) as Map<String, Object?>;
+      expect((answer["businesses"] as List).single, created);
+      expect(answer["tasks"], isEmpty);
+      expect((answer["deployment"] as Map)["timezone"], "America/Caracas");
+
+      await expectRefusal(create(owner, draft), "company_exists");
+    });
+
+    test('a wrong field creates nothing', () async {
+      await expectRefusal(create(owner, {...draft, "currency": "ZZZ"}), ErrorCodes.invalidField);
+      await expectRefusal(create(owner, {...draft, "activity": "PIRACY"}), ErrorCodes.invalidField);
+      await expectRefusal(create(owner, {...draft, "name": " "}), ErrorCodes.required);
+
+      expect((await owner.call(Ops.sessionBootstrap) as Map)["businesses"], isEmpty);
+    });
+
+    test('only the owner creates it', () async {
+      final account = ownerTokens["accountId"] as String;
+      bare.openEngine.store.write((db) {
+        db.execute("DELETE FROM grants WHERE account = ?", [account]);
+        db.execute("INSERT INTO grants (account, permission) VALUES (?, 'business.view')", [account]);
+      });
+      final (reader, _) = await bare.signIn();
+
+      await expectRefusal(create(reader, draft), ErrorCodes.forbidden);
+    });
+  });
+
   group('business.company', () {
     test('an edit writes one key and answers the profile (B-2)', () async {
       final profile = await write(Ops.businessEdit, {"legalName": "  Lovelace C.A.  "}) as Map;

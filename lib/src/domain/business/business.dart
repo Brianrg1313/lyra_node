@@ -11,7 +11,7 @@ import '../../oplog/oplog.dart';
 import '../../storage/store.dart';
 import 'zones.dart';
 
-/// What setup creates the company with (`business.md` B-1).
+/// What setup or `business.create` creates the company with (`business.md` B-1).
 final class CompanyDraft {
   const CompanyDraft({
     required this.name,
@@ -19,6 +19,7 @@ final class CompanyDraft {
     required this.currency,
     required this.language,
     this.timezone,
+    this.activity,
   });
 
   factory CompanyDraft.fromJson(Map<String, Object?> json) => CompanyDraft(
@@ -27,6 +28,7 @@ final class CompanyDraft {
     currency: json["currency"] as String? ?? "",
     language: json["language"] as String? ?? "",
     timezone: json["timezone"] as String?,
+    activity: json["activity"] as String?,
   );
 
   final String name;
@@ -34,6 +36,9 @@ final class CompanyDraft {
   final String currency;
   final String language;
   final String? timezone;
+
+  /// A code of `Catalogs.activities`, what the welcome's "create company" asks.
+  final String? activity;
 
   /// Throws the refusal for the first field that is wrong, before anything is written.
   void check() {
@@ -44,6 +49,7 @@ final class CompanyDraft {
     }
     Business._language(language);
     if (timezone != null && timezone!.trim().isNotEmpty) Business._timezone(timezone!);
+    Business._activity(activity);
   }
 }
 
@@ -76,8 +82,8 @@ final class Business {
     "address": "address", "landmark": "landmark", "city": "city", "region": "region", "postalCode": "postal_code",
   };
 
-  /// Creates the company and its site at setup (B-1). Runs once: a second call hits the
-  /// single-row constraint.
+  /// Creates the company and its site, at setup or with `business.create` (B-1). Runs once: a
+  /// second call hits the single-row constraint.
   static void create(Database db, CompanyDraft draft, {required HlcClock clock, required DateTime now, String? actor}) {
     draft.check();
 
@@ -87,10 +93,11 @@ final class Business {
     final timezone = draft.timezone?.trim();
 
     db.execute(
-      "INSERT INTO company (id, name, country, currency, language, timezone, created, created_hlc, updated_hlc) "
-      "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      "INSERT INTO company (id, name, country, currency, language, timezone, activity, created, created_hlc, updated_hlc) "
+      "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       [id, name, draft.country.trim().toUpperCase(), draft.currency.trim().toUpperCase(),
         draft.language.trim().toLowerCase(), timezone == null || timezone.isEmpty ? null : timezone,
+        Business._activity(draft.activity),
         now.toUtc().toIso8601String(), stamp.pack(), stamp.pack()],
     );
     db.execute(

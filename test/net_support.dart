@@ -19,7 +19,9 @@ PairingDevice deviceNamed(String name, {String platform = "windows"}) =>
 final class TestMaster {
   TestMaster._(this.paths, this.vault, this.engine, this.server, this.master, this.controlKey);
 
-  static Future<TestMaster> start({String? passphrase, String? webRoot}) async {
+  /// [withCompany] false: set up as the sign in's "Create Master Server" does, the company left
+  /// to `business.create`.
+  static Future<TestMaster> start({String? passphrase, String? webRoot, bool withCompany = true}) async {
     final paths = tempPaths(addTearDown);
     final vault = MemoryVault();
     final key = EcKeyPair.generate();
@@ -28,6 +30,7 @@ final class TestMaster {
       vault,
       passphrase: passphrase,
       device: DeviceDraft(device: deviceNamed("Server"), publicKey: key.spki),
+      withCompany: withCompany,
     );
     final controlKey = await Engine.controlKey(vault, setup.instanceId);
     final transport = (await Transport.read(paths.transport, controlKey))!;

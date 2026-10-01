@@ -9,6 +9,7 @@ import '../identity/devices.dart';
 import '../identity/permissions.dart';
 import '../audit/audit_log.dart';
 import '../crypto/sealed.dart';
+import '../domain/business/business.dart';
 import '../domain/inventory/inventory.dart';
 import '../domain/inventory/spreadsheet.dart';
 import '../domain/money/finance.dart';
@@ -41,6 +42,8 @@ final Map<String, OpRule> opRules = {
   Ops.devicesBrowserCa.name: const OpRule(_browserCa),
   Ops.sessionBootstrap.name: const OpRule(_bootstrap),
   Ops.catalogGet.name: const OpRule(_catalog),
+  // The owner's alone, which the handler checks: no grant names it (B-1).
+  Ops.businessCreate.name: const OpRule(_createBusiness),
   Ops.businessProfile.name: const OpRule(_profile, permission: _businessView),
   Ops.businessEdit.name: const OpRule(_editProfile, permission: "business.settings.edit"),
   Ops.businessSetLogo.name: const OpRule(_setLogo, permission: "business.settings.edit_logo"),
@@ -330,16 +333,18 @@ Future<Object?> _browserCa(OpCall call) async {
 }
 
 /// `session.bootstrap` (`session.md`): what `/init` answers in the cloud, for this master's one
-/// company (S-30), with no tasks (S-31) and the bundled catalogues (S-32).
+/// company (S-30), with the bundled catalogues (S-32). A master set up without its company answers
+/// none and the cloud's `business.none` task (S-31): the app's welcome creates it.
 Future<Object?> _bootstrap(OpCall call) async {
   final engine = call.engine;
   final business = engine.business;
+  final exists = business.exists;
 
   return {
     "client": engine.accounts.card(call.session.accountId),
-    "businesses": [business.summary()],
-    "permissions": {business.id: [...call.connection.grants]..sort()},
-    "tasks": const <Object?>[],
+    "businesses": [if (exists) business.summary()],
+    "permissions": {if (exists) business.id: [...call.connection.grants]..sort()},
+    "tasks": [if (!exists) {"key": "business.none"}],
     "catalogs": {
       "version": Catalogs.version,
       Catalogs.countries: Catalogs.countryRows,
@@ -349,7 +354,7 @@ Future<Object?> _bootstrap(OpCall call) async {
       "mode": "local",
       "instanceId": engine.instanceId,
       "engine": engineVersion,
-      "timezone": business.timezone,
+      "timezone": exists ? business.timezone : null,
     },
   };
 }
@@ -364,6 +369,21 @@ Future<Object?> _catalog(OpCall call) async {
 }
 
 bool _isOwner(OpCall call) => call.connection.grants.contains(Permissions.all);
+
+/// `business.create {name, country, currency, language, activity?}` (B-1): the owner creates the
+/// company of a master set up without one, once.
+Future<Object?> _createBusiness(OpCall call) async {
+  if (!_isOwner(call)) throw const EngineFailure(ErrorCodes.forbidden);
+
+  return call.write(() {
+    final engine = call.engine;
+    if (engine.business.exists) throw const EngineFailure("company_exists");
+
+    Business.create(engine.store.db, CompanyDraft.fromJson(call.args), clock: engine.clock, now: engine.now(), actor: call.session.accountId);
+
+    return engine.business.summary();
+  });
+}
 
 Future<Object?> _profile(OpCall call) async => call.engine.business.profile(owner: _isOwner(call));
 

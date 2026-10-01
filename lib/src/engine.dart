@@ -248,8 +248,9 @@ final class Engine {
     return fresh;
   }
 
-  /// Makes a new master in [paths]: the keys, the database, its owner and its company (plan §6.2,
-  /// §7.4, `business.md` B-1).
+  /// Makes a new master in [paths]: the keys, the database, its owner and, when given, its company
+  /// (plan §6.2, §7.4, `business.md` B-1). Without one, the owner creates it after signing in
+  /// (`business.create`), the way the cloud's welcome does.
   ///
   /// [passphrase] chooses passphrase mode. Answers the recovery key, **the only time it exists
   /// outside the owner's hands**. If anything fails, whatever was already written is removed,
@@ -258,7 +259,7 @@ final class Engine {
     required NodePaths paths,
     required KeyVault vault,
     required OwnerDraft owner,
-    required CompanyDraft company,
+    CompanyDraft? company,
     DeviceDraft? device,
     String? passphrase,
     Argon2Params params = Argon2Params.standard,
@@ -273,7 +274,7 @@ final class Engine {
     if (File(paths.database).existsSync()) throw const EngineFailure("data_exists");
 
     // Before any key or file exists: a wrong field leaves nothing to clean up.
-    company.check();
+    company?.check();
 
     final instanceId = newId();
     final clock = now ?? DateTime.now;
@@ -312,7 +313,7 @@ final class Engine {
         lastName: owner.lastName,
         email: owner.email,
       );
-      store.write((db) => Business.create(db, company, clock: hlc, now: clock(), actor: account.id));
+      if (company != null) store.write((db) => Business.create(db, company, clock: hlc, now: clock(), actor: account.id));
 
       // The CA, the server certificate and the master's own device, so the first start already
       // serves the LAN (plan §5.3).

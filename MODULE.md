@@ -11,7 +11,7 @@ one writer. Phase 2 built storage, keys, oplog, identities, audit and the proces
 - `bin/lyra_node.dart` — the executable: `setup`, `run`, `status`, `stop`, `recover`, `enroll`, `version`; one JSON
   line out, secrets only on stdin. Table of commands in its `///`.
 - `lib/lyra_node.dart` — barrel (for `bin/` and tests).
-- `lib/src/engine.dart` — `Engine` (`setup` with the owner and the company, `open`, `recover`, `close`, `controlKey`,
+- `lib/src/engine.dart` — `Engine` (`setup` with the owner and, optionally, the company, `open`, `recover`, `close`, `controlKey`,
   `enrollMaster`, `prepareTransport`; holds `sessions`, `events`, `authority`, `files`, `business`, `inventory`,
   `stock`, `pos`, `sales`, `finance`, `methods`, `accounting`, `sealed`), `OwnerDraft`,
   `DeviceDraft`, `EnrolledDevice`,
@@ -38,8 +38,8 @@ one writer. Phase 2 built storage, keys, oplog, identities, audit and the proces
 - `lib/src/storage/migrations/m001_core.dart` — `meta`, `oplog`, `commands`, `audit`, `accounts`, `grants`.
 - `lib/src/storage/migrations/m002_network.dart` — `devices`, `sessions`, `refresh_spent`, `events`, `files`.
 - `lib/src/storage/migrations/m003_business.dart` — `company`, `site` (one row each; the point in millionths).
-- `lib/src/domain/business/business.dart` — `CompanyDraft` (setup, checked before anything is written), `Business`
-  (`create`, `profile`, `summary`, `edit` one key, `setLogo`, `site`, `editSite`, `timezone`, `language`, `currency`,
+- `lib/src/domain/business/business.dart` — `CompanyDraft` (setup or `business.create`, checked before anything is
+  written), `Business` (`create`, `profile`, `summary`, `edit` one key, `setLogo`, `site`, `editSite`, `timezone`, `language`, `currency`,
   `decimals`): `business.md`.
 - `lib/src/domain/business/zones.dart` — `Zones` (the IANA database compiled in: `known`, `dayOf` a zone's day in UTC,
   `startOf` a calendar day, `local` an instant as ISO with the zone's offset).

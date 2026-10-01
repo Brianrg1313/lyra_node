@@ -13,7 +13,7 @@ import 'package:lyra_protocol/lyra_protocol.dart';
 ///
 /// | command | stdin | stdout |
 /// |---|---|---|
-/// | `setup` | `{owner: {username, password, firstName, lastName, email?}, company: {name, country, currency, language, timezone?}, device?, passphrase?}` | `{instanceId, recovery: [24 words], device?}` |
+/// | `setup` | `{owner: {username, password, firstName, lastName, email?}, company?: {name, country, currency, language, timezone?}, device?, passphrase?}` | `{instanceId, recovery: [24 words], device?}` |
 /// | `run [--port <n>] [--web <folder>]` | the passphrase, one line, with `--passphrase-stdin` | nothing; runs until stopped |
 /// | `status` | — | `{status, pid?, version?, instanceId?, port?}` |
 /// | `stop` | — | `{stopped: bool}` |
@@ -42,7 +42,7 @@ Future<void> main(List<String> arguments) async {
           paths: paths,
           vault: vault,
           owner: OwnerDraft.fromJson((input["owner"] as Map?)?.cast<String, Object?>() ?? const {}),
-          company: CompanyDraft.fromJson((input["company"] as Map?)?.cast<String, Object?>() ?? const {}),
+          company: input["company"] is Map ? CompanyDraft.fromJson((input["company"] as Map).cast<String, Object?>()) : null,
           device: _device(input),
           passphrase: input["passphrase"] as String?,
         );
