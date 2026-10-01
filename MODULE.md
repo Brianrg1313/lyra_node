@@ -3,7 +3,7 @@
 **Path** `E:/andromeda/frontend/packages/lyra_node` (own git repo, pure Dart, no Flutter)
 **Role** The engine that runs on the master (`lyra/app/docs/plan-offline-lan.md` §3, §8): one company, encrypted,
 one writer. Phase 2 built storage, keys, oplog, identities, audit and the process lifecycle; phase 3 the LAN server
-(TLS, pairing, RPC, events, files, mDNS); phase 4 adds the domains one per release (business, inventory and stock so far). Rules come from `lyra/app/docs/offline/specs/*`, never from backend code (plan principle 1).
+(TLS, pairing, RPC, events, files, mDNS); phase 4 adds the domains one per release (business, inventory and stock, import, POS so far). Rules come from `lyra/app/docs/offline/specs/*`, never from backend code (plan principle 1).
 **Used by** `lyra/app` through the executable only (`LocalServerService`), never as a Dart import.
 
 ## Files
@@ -13,7 +13,7 @@ one writer. Phase 2 built storage, keys, oplog, identities, audit and the proces
 - `lib/lyra_node.dart` — barrel (for `bin/` and tests).
 - `lib/src/engine.dart` — `Engine` (`setup` with the owner and the company, `open`, `recover`, `close`, `controlKey`,
   `enrollMaster`, `prepareTransport`; holds `sessions`, `events`, `authority`, `files`, `business`, `inventory`,
-  `stock`), `OwnerDraft`,
+  `stock`, `pos`), `OwnerDraft`,
   `DeviceDraft`, `EnrolledDevice`,
   `engineVersion`, `minAppVersion`.
 - `lib/src/failure.dart` — `EngineFailure` (a rule's refusal: stable `code` + `data`, no message).
@@ -35,9 +35,12 @@ one writer. Phase 2 built storage, keys, oplog, identities, audit and the proces
 - `lib/src/storage/migrations/m002_network.dart` — `devices`, `sessions`, `refresh_spent`, `events`, `files`.
 - `lib/src/storage/migrations/m003_business.dart` — `company`, `site` (one row each; the point in millionths).
 - `lib/src/domain/business/business.dart` — `CompanyDraft` (setup, checked before anything is written), `Business`
-  (`create`, `profile`, `summary`, `edit` one key, `setLogo`, `site`, `editSite`, `timezone`): `business.md`.
+  (`create`, `profile`, `summary`, `edit` one key, `setLogo`, `site`, `editSite`, `timezone`, `language`, `currency`,
+  `decimals`): `business.md`.
+- `lib/src/domain/business/zones.dart` — `Zones` (the IANA database compiled in: `known`, `dayOf` a zone's day in UTC).
 - `lib/src/storage/migrations/m004_inventory.dart` — `inventory_tables`, `inventory_fields`, `inventory_records` (cells as
   one JSON object), `stock_movements`, `stock_balances`, `stock_holds`.
+- `lib/src/storage/migrations/m005_pos.dart` — `pos_invoices`, `pos_lines` (a line's id is its hold's), `pos_series`.
 - `lib/src/domain/inventory/inventory.dart` — `Inventory`: tables (templates, primary flag), fields (dense positions,
   re-typing, width alone), records (checked cells, SKU, counter, text search), images; reads for the ledger
   (`product`, `primaryTable`): `inventory.md`.
@@ -48,8 +51,11 @@ one writer. Phase 2 built storage, keys, oplog, identities, audit and the proces
 - `lib/src/domain/inventory/typing.dart` — `Typing` (I-43: header keywords, value rules, one title/stock; `cell`
   reads a value as a type with the language's number and date marks; `units`, `gtin`).
 - `lib/src/domain/inventory/cells.dart` — `Cells` (what a cell stores per field type, I-21; `read` for re-typing).
-- `lib/src/domain/stock/stock.dart` — `Stock` (`move` with the projection and manual holds, `balanceOf`, `history`,
-  `summary`, `rebuild`): `stock.md`.
+- `lib/src/domain/stock/stock.dart` — `Stock` (`move` with the projection, manual holds and a ticket line's hold,
+  `held`, `balanceOf`, `history`, `summary`, `rebuild`): `stock.md`.
+- `lib/src/domain/pos/pos.dart` — `Pos` (`summary`, `methods`, `catalog` by field type and cursor, `open` with the
+  device's code, `line`, `close`, `cancel`, `list`; every figure computed from frozen lines): `pos.md`.
+- `lib/src/domain/pos/money.dart` — `Money` (minor units, percents as text, half away from zero, in integers).
 - `lib/src/oplog/hlc.dart` — `Hlc` (packed, sortable), `HlcClock` (never backwards, `maxDrift`), `ClockDrift`.
 - `lib/src/oplog/oplog.dart` — `Oplog` (`append` inside the write, `since`, `lastSeq`, `lastHlc`), `OplogEntry`.
 - `lib/src/oplog/commands.dart` — `CommandLedger` (`commandId` idempotence, 30 days), `CommandReused`.
@@ -71,10 +77,11 @@ one writer. Phase 2 built storage, keys, oplog, identities, audit and the proces
   `OpCall` (`write` = change + `commandId` answer in one transaction), `Gate`.
 - `lib/src/net/ops.dart` — `opRules`: every op this engine serves, with its gate and permission.
 - `lib/src/net/pairing.dart` — `PairingDesk` (the live ticket, SPAKE2 master side, 3 failures void it).
-- `lib/src/net/events.dart` — `EventLog` (append inside a write, `publish` after, replay window, `resync_required`),
-  `StoredEvent`.
+- `lib/src/net/events.dart` — `EventLog` (append inside a write for a permission or `anyOf` several, `publish` after,
+  replay window, `resync_required`), `StoredEvent`.
 - `lib/src/net/files.dart` — `FileStore` (sealed uploads, type sniffing, a sealed 320 px thumbnail of each image made off
-  the isolate, `get` with `size`, `claim` / `release` by a record, `once` / `discard` for an import, orphan sweep),
+  the isolate, `get` with `size` (a product image also for `pos.view`), `claim` / `release` by a record, `once` /
+  `discard` for an import, orphan sweep),
   `FilePurpose`.
 - `lib/src/net/messages.dart` — `Messages` (refusal code → `RpcError` with message and action).
 - `lib/src/net/web_bundle.dart` — `WebBundle` (static web build, CSP).
@@ -96,6 +103,8 @@ one writer. Phase 2 built storage, keys, oplog, identities, audit and the proces
   `business/changed`, permissions, the site's point, the logo, `catalog.get` (rule numbers in the names).
 - `test/inventory_test.dart` — inventory and stock over the LAN: tables, templates and the primary flag, fields and
   positions, cells and SKUs, search, images and thumbnails, movements, holds, replays, events, history, summary.
+- `test/pos_test.dart` — money and zones; the counter over the LAN: catalogue by type, codes per device, lines and
+  holds, refusals and their permissions, close and cancel, untracked products, I-4, events to a cashier.
 - `test/import_test.dart` — importing: `.csv` / `.xlsx` reading, the typing rules, both steps over the LAN with their
   events and opening balances, normalizing, limits.
 - `test/discovery_test.dart` — mDNS answers (and a live lookup, tag `network`).

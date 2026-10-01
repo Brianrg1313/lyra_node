@@ -106,6 +106,11 @@ final class FileStore {
     return id;
   }
 
+  /// A referenced file's readers besides its permission's, by purpose: a till draws the product
+  /// pictures without seeing the inventory (`pos.md` POS-1). Read here and not stored, so the
+  /// images claimed before the POS release are covered too.
+  static final Map<String, String> _alsoReadBy = {FilePurpose.productImage.header: "pos.view"};
+
   /// Reads [id] for [account] holding [grants]: the file's permission once a record references
   /// it, its uploader until then. Anything else is `not_found`, so ids can't be probed.
   ///
@@ -117,7 +122,10 @@ final class FileStore {
 
     final row = rows.first;
     final permission = row["permission"] as String?;
-    final allowed = permission == null ? row["owner"] == account : Permissions.allows(grants, permission);
+    final also = _alsoReadBy[row["purpose"]];
+    final allowed = permission == null
+      ? row["owner"] == account
+      : Permissions.allows(grants, permission) || also != null && Permissions.allows(grants, also);
     final file = File(p.join(_folder, id));
 
     if (!allowed || !file.existsSync()) throw const EngineFailure("not_found");

@@ -51,6 +51,13 @@ abstract final class Messages {
     "unsupported_file": "That file can't be read: import an .xlsx or a .csv.",
     "too_large": "The file is too big: up to 50,000 rows and 250 columns.",
     "empty_file": "The file has no header row to build the table from.",
+    "has_open_tickets": "An open ticket holds products of this table: charge it or cancel it first.",
+    "no_price": "This product has no price: write one in the table first.",
+    "too_many_units": "A line can have up to 9,999 units.",
+    "invoice_closed": "This ticket was already charged.",
+    "invoice_cancelled": "This ticket was cancelled.",
+    "empty_invoice": "The ticket has nothing on it to charge.",
+    "unknown_method": "That payment method isn't accepted here.",
   };
 
   /// Codes whose client must go somewhere (`ErrorActions`).

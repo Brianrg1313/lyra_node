@@ -126,10 +126,18 @@ final class Inventory {
   }
 
   /// `inventory.tables.delete {id}` (I-2, I-3): soft; records leave every list, movements stay.
-  /// A primary table hands the flag to the oldest one left.
+  /// A primary table hands the flag to the oldest one left. Refused while an open POS ticket holds
+  /// one of its products (I-4): the ticket would charge a product that no longer exists.
   void deleteTable(String id, {String? actor, String? device}) => _store.write((db) {
     final table = _table(id);
     final stamp = _clock.tick();
+
+    final held = db.select(
+      "SELECT DISTINCT i.ticket FROM pos_lines l JOIN pos_invoices i ON i.id = l.invoice_id "
+      "WHERE l.table_id = ? AND i.status = 'open' ORDER BY i.ticket",
+      [id],
+    );
+    if (held.isNotEmpty) throw EngineFailure("has_open_tickets", {"tickets": [for (final row in held) row["ticket"]]});
 
     db.execute("UPDATE inventory_tables SET deleted = 1, is_primary = 0, updated = ?, updated_hlc = ? WHERE id = ?",
       [_stamp, stamp.pack(), id]);

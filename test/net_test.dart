@@ -57,7 +57,7 @@ void main() {
       final client = await master.connect();
 
       await expectRefusal(client.call(Ops.devicesList), ErrorCodes.sessionExpired);
-      await expectRefusal(client.call(Ops.posSummary), ErrorCodes.unknownOp);
+      await expectRefusal(client.call(Ops.posSnapshot), ErrorCodes.unknownOp);
 
       // The client library refuses to send it; a hand-written frame reaches the master.
       final (signedIn, _) = await master.signIn();

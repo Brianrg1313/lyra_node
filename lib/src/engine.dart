@@ -11,6 +11,7 @@ import 'crypto/secrets.dart';
 import 'crypto/vault.dart';
 import 'domain/business/business.dart';
 import 'domain/inventory/inventory.dart';
+import 'domain/pos/pos.dart';
 import 'domain/stock/stock.dart';
 import 'failure.dart';
 import 'identity/accounts.dart';
@@ -138,6 +139,8 @@ final class Engine {
   late final Inventory inventory = Inventory(store, clock, now: _now);
 
   late final Stock stock = Stock(store, clock, inventory, now: _now);
+
+  late final Pos pos = Pos(store, clock, inventory, stock, business, now: _now);
 
   Devices get devices => Devices(store, clock, now: _now);
 

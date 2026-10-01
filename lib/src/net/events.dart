@@ -10,7 +10,7 @@ import '../storage/store.dart';
 
 /// One event of the stream, with who may receive it.
 final class StoredEvent {
-  const StoredEvent({required this.seq, required this.name, required this.data, this.accounts, this.permission});
+  const StoredEvent({required this.seq, required this.name, required this.data, this.accounts, this.permissions});
 
   final int seq;
   final String name;
@@ -19,14 +19,14 @@ final class StoredEvent {
   /// Only these accounts' sessions receive it (`permissions/changed`).
   final List<String>? accounts;
 
-  /// Only sessions holding this permission receive it.
-  final String? permission;
+  /// Only sessions holding one of these permissions receive it.
+  final List<String>? permissions;
 
   /// Whether a session of [accountId] with [grants] may see it (`protocol-v1.md` §5: a client
   /// never receives an event about data it can't read).
   bool visibleTo(String accountId, Set<String> grants) =>
     (accounts == null || accounts!.contains(accountId)) &&
-    (permission == null || Permissions.allows(grants, permission!));
+    (permissions == null || permissions!.any((permission) => Permissions.allows(grants, permission)));
 
   RpcEvent get frame => RpcEvent(event: name, seq: seq, data: data);
 }
@@ -54,7 +54,7 @@ final class EventLog {
 
   int get _lastSeq => _store.db.select("SELECT coalesce(max(seq), 0) AS seq FROM events").first["seq"] as int;
 
-  /// Appends one event inside a write.
+  /// Appends one event inside a write, for sessions holding [permission] or any of [anyOf].
   static void append(
     Database db,
     String name,
@@ -62,10 +62,12 @@ final class EventLog {
     required DateTime at,
     List<String>? accounts,
     String? permission,
+    List<String>? anyOf,
   }) {
-    final audience = accounts == null && permission == null
+    final permissions = [?permission, ...?anyOf];
+    final audience = accounts == null && permissions.isEmpty
       ? null
-      : jsonEncode({"accounts": ?accounts, "permission": ?permission});
+      : jsonEncode({"accounts": ?accounts, if (permissions.isNotEmpty) "anyOf": permissions});
 
     db.execute(
       "INSERT INTO events (at, name, data, audience) VALUES (?, ?, ?, ?)",
@@ -124,7 +126,9 @@ final class EventLog {
       name: row["name"] as String,
       data: jsonDecode(row["data"] as String),
       accounts: (audience?["accounts"] as List?)?.cast<String>(),
-      permission: audience?["permission"] as String?,
+      // Before the POS release an audience named one `permission`.
+      permissions: (audience?["anyOf"] as List?)?.cast<String>() ??
+        (audience?["permission"] is String ? [audience!["permission"] as String] : null),
     );
   }
 }

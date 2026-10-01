@@ -9,6 +9,7 @@ import '../../net/files.dart';
 import '../../oplog/hlc.dart';
 import '../../oplog/oplog.dart';
 import '../../storage/store.dart';
+import 'zones.dart';
 
 /// What setup creates the company with (`business.md` B-1).
 final class CompanyDraft {
@@ -129,6 +130,16 @@ final class Business {
 
     return row["timezone"] as String? ?? Catalogs.country(row["country"] as String)?["timezone"] as String? ?? "UTC";
   }
+
+  /// The company's language (`es`, `en`, …): what catalogue texts are named in (B-22).
+  String get language => _company["language"] as String;
+
+  /// The company's main currency (ISO 4217): what POS money is counted in.
+  String get currency => _company["currency"] as String;
+
+  /// How many minor digits [currency] has (`CurrencyModel.decimals`).
+  int get decimals =>
+    Catalogs.currencyRows.where((row) => row["code"] == currency).firstOrNull?["decimals"] as int? ?? 2;
 
   /// `business.profile`. [owner]: whether the reader holds `*` (the app's "owner" badge).
   Map<String, Object?> profile({required bool owner}) {
@@ -391,14 +402,11 @@ final class Business {
     return value;
   }
 
-  /// An IANA zone name's shape (`Area/Location`, or `UTC`). The engine carries no zone database
-  /// yet; the full check arrives with the day boundaries of money and POS (B-9).
+  /// A zone of the IANA database the engine carries (B-9, `Zones`).
   static String _timezone(String raw) {
     final value = raw.trim();
 
-    if (value != "UTC" && !RegExp(r"^[A-Z][A-Za-z_]+(/[A-Za-z0-9_+\-]+){1,2}$").hasMatch(value)) {
-      throw const EngineFailure("invalid_timezone");
-    }
+    if (!Zones.known(value)) throw const EngineFailure("invalid_timezone");
 
     return value;
   }

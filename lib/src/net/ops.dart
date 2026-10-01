@@ -65,12 +65,22 @@ final Map<String, OpRule> opRules = {
   Ops.stockMove.name: const OpRule(_move, permission: "inventory.move_stock"),
   Ops.stockHistory.name: const OpRule(_history, permission: _inventoryView),
   Ops.stockSummary.name: const OpRule(_summary, permission: _inventoryView),
+  Ops.posSummary.name: const OpRule(_posSummary, permission: _posView),
+  Ops.posCatalog.name: const OpRule(_posCatalog, permission: _posView),
+  Ops.posMethods.name: const OpRule(_posMethods, permission: _posView),
+  // A typed-in charge and a changed rate need more (`pos.md`, ops): the handler asks.
+  Ops.posInvoicesOpen.name: const OpRule(_openInvoice, permission: "pos.sell"),
+  Ops.posInvoicesLine.name: const OpRule(_writeLine, permission: "pos.sell"),
+  Ops.posInvoicesClose.name: const OpRule(_closeInvoice, permission: "pos.checkout"),
+  Ops.posInvoicesCancel.name: const OpRule(_cancelInvoice, permission: "pos.cancel_ticket"),
+  Ops.posInvoicesList.name: const OpRule(_openInvoices, permission: _posView),
 };
 
 const _businessView = "business.view";
 const _inventoryView = "inventory.view";
 const _editColumns = "inventory.edit_columns";
 const _editRecords = "inventory.edit_records";
+const _posView = "pos.view";
 
 /// `docs/app-areas.json`, area `local_server`.
 const _devicesPermission = "local_server.devices";
@@ -345,7 +355,7 @@ Future<Object?> _createTable(OpCall call) async => call.write(() =>
 Future<Object?> _editTable(OpCall call) async => call.write(() =>
   call.engine.inventory.editTable(call.args, actor: call.session.accountId, device: call.device.id));
 
-/// `inventory.tables.delete {id}` (I-2). I-4 (open tickets) arrives with the POS release.
+/// `inventory.tables.delete {id}` (I-2, I-4).
 Future<Object?> _deleteTable(OpCall call) async => call.write(() {
   call.engine.inventory.deleteTable(call.text("id"), actor: call.session.accountId, device: call.device.id);
   return const <String, Object?>{};
@@ -519,3 +529,60 @@ Future<Object?> _summary(OpCall call) async => call.engine.stock.summary(
   size: _int(call, "size", 30),
   match: call.args["match"] == null ? "" : call.text("match", max: 200),
 );
+
+// ---------------------------------------------------------------- pos (`pos.md`)
+
+Future<Object?> _posSummary(OpCall call) async => call.engine.pos.summary(call.session.accountId);
+
+Future<Object?> _posMethods(OpCall call) async => call.engine.pos.methods();
+
+/// `pos.catalog {size, cursor?, search?, category?}` (POS-1 to POS-4).
+Future<Object?> _posCatalog(OpCall call) async => call.engine.pos.catalog(
+  size: _int(call, "size", 30),
+  cursor: call.args["cursor"] == null ? null : call.text("cursor", max: 2048),
+  search: call.args["search"] == null ? "" : call.text("search", max: 200),
+  category: call.args["category"] == null ? "" : call.text("category", max: 1000),
+);
+
+/// `pos.invoices.open {tax?}` (POS-10, POS-40): the code is this device's.
+Future<Object?> _openInvoice(OpCall call) async => call.write(() => call.engine.pos.open(
+  tax: call.args["tax"],
+  seller: call.session.accountId,
+  device: call.device.id,
+  deviceCode: call.device.code,
+));
+
+/// `pos.invoices.line` (POS-11 to POS-18).
+Future<Object?> _writeLine(OpCall call) async => call.write(() => call.engine.pos.line(
+  call.text("id"),
+  call.args,
+  need: (permission) {
+    if (!Permissions.allows(call.connection.grants, permission)) throw const EngineFailure(ErrorCodes.forbidden);
+  },
+  actor: call.session.accountId,
+  device: call.device.id,
+));
+
+/// `pos.invoices.close {id, method, reference?, note?}` (POS-30 to POS-36).
+Future<Object?> _closeInvoice(OpCall call) async => call.write(() => call.engine.pos.close(
+  call.text("id"),
+  method: call.args["method"],
+  reference: call.args["reference"],
+  note: call.args["note"],
+  actor: call.session.accountId,
+  device: call.device.id,
+));
+
+/// `pos.invoices.cancel {id}` (POS-35, POS-36).
+Future<Object?> _cancelInvoice(OpCall call) async => call.write(() {
+  call.engine.pos.cancel(call.text("id"), actor: call.session.accountId, device: call.device.id);
+  return const <String, Object?>{};
+});
+
+/// `pos.invoices.list {mine?, size?}` (POS-45): `mine` is this device, not the person.
+Future<Object?> _openInvoices(OpCall call) async {
+  final mine = call.args["mine"];
+  if (mine != null && mine is! bool) throw const EngineFailure(ErrorCodes.invalidField, {"field": "mine"});
+
+  return call.engine.pos.list(device: mine == true ? call.device.id : null, size: _int(call, "size", 20));
+}

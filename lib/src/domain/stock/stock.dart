@@ -23,8 +23,8 @@ final class Stock {
 
   Database get _db => _store.db;
 
-  /// Who receives `stock/changed`. The POS release adds its tills' audience.
-  static const viewPermission = Inventory.viewPermission;
+  /// Who receives `stock/changed`: the stock screen and the tills (`pos.md`, events).
+  static const audience = [Inventory.viewPermission, "pos.view"];
 
   static const maxQuantity = 1000000;
   static const _maxSummaryPage = 200;
@@ -36,6 +36,11 @@ final class Stock {
   ///
   /// Without [announce] no `stock/changed` is emitted: an import's opening balances (I-44) are
   /// thousands of movements that one `table/changed` already tells about.
+  ///
+  /// A POS movement (`source: pos`) names the ticket line whose hold it moves ([hold], the line's
+  /// id): `reserve` grows it, `unreserve` shrinks it, and a `remove` (the sale) consumes it, so
+  /// that `remove` also takes its units off `reserved` (ST-23; the close tops every hold up to the
+  /// line's quantity first, POS-31).
   Map<String, Object?> move({
     required String operation,
     required String tableId,
@@ -45,6 +50,7 @@ final class Stock {
     Object? note,
     String source = "manual",
     String? invoiceId,
+    String? hold,
     String? actor,
     String? device,
     String? commandId,
@@ -75,6 +81,7 @@ final class Stock {
           if (why == "return") returns -= quantity;
         case StockOperations.remove:
           onHand -= quantity;
+          if (source == "pos") reserved -= quantity;
         case StockOperations.reserve:
           reserved += quantity;
         case StockOperations.unreserve:
@@ -122,6 +129,7 @@ final class Stock {
       );
 
       if (source == "manual") _holds(db, productId, tableId, product.sku, operation, quantity);
+      if (hold != null) _lineHold(db, hold, invoiceId, productId, tableId, product.sku, operation, quantity);
 
       Oplog(db).append(hlc: stamp, entity: "stock_movement", entityId: id, kind: "created", payload: {
         "product": productId, "table": tableId, "operation": operation, "reason": why, "quantity": quantity,
@@ -134,7 +142,7 @@ final class Stock {
           "onHand": onHand,
           "reserved": reserved,
           "available": onHand - reserved,
-        }, at: _now(), permission: viewPermission);
+        }, at: _now(), anyOf: audience);
       }
 
       return _answer(onHand, reserved, returns, review == 1);
@@ -295,6 +303,36 @@ final class Stock {
     }
   }
 
+  /// A ticket line's hold (ST-20, ST-23): one row per line, under the line's id, so the line reads
+  /// its `held` back from it even after the stock screen shrank it.
+  void _lineHold(Database db, String hold, String? invoiceId, String productId, String tableId, String? sku,
+      String operation, int quantity) {
+    final qty = db.select("SELECT qty FROM stock_holds WHERE id = ?", [hold]).firstOrNull?["qty"] as int?;
+
+    switch (operation) {
+      case StockOperations.reserve when qty == null:
+        db.execute(
+          "INSERT INTO stock_holds (id, product_id, table_id, sku, qty, status, owner_kind, owner_id, created) "
+          "VALUES (?, ?, ?, ?, ?, 'active', 'invoice', ?, ?)",
+          [hold, productId, tableId, sku, quantity, invoiceId, _now().toUtc().toIso8601String()],
+        );
+      case StockOperations.reserve:
+        db.execute("UPDATE stock_holds SET qty = ?, status = 'active' WHERE id = ?", [qty! + quantity, hold]);
+      case StockOperations.unreserve:
+        final left = (qty ?? 0) - quantity;
+        db.execute(
+          "UPDATE stock_holds SET qty = ?, status = CASE WHEN ? = 0 THEN 'released' ELSE status END WHERE id = ?",
+          [left < 0 ? 0 : left, left <= 0 ? 0 : left, hold],
+        );
+      case StockOperations.remove:
+        db.execute("UPDATE stock_holds SET status = 'consumed' WHERE id = ?", [hold]);
+    }
+  }
+
+  /// The units [hold] (a ticket line's id) still holds: 0 once released or consumed.
+  int held(String hold) =>
+    _db.select("SELECT qty FROM stock_holds WHERE id = ? AND status = 'active'", [hold]).firstOrNull?["qty"] as int? ?? 0;
+
   ({int onHand, int reserved, int returns, int review}) _balance(String productId) {
     final row = _db.select("SELECT * FROM stock_balances WHERE product_id = ?", [productId]).firstOrNull;
 
@@ -331,6 +369,7 @@ final class Stock {
           if (row["reason"] == "return") returns -= quantity;
         case StockOperations.remove:
           onHand -= quantity;
+          if (row["source"] == "pos") reserved -= quantity;
         case StockOperations.reserve:
           reserved += quantity;
         case StockOperations.unreserve:

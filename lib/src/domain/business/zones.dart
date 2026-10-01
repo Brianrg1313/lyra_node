@@ -1,0 +1,36 @@
+import 'package:timezone/data/latest.dart' as tzdata;
+import 'package:timezone/timezone.dart' as tz;
+
+/// The IANA zone database the engine carries (README, time: "today" is computed in the company's
+/// zone, on the master's clock). Loaded on first use, from the copy compiled into the executable,
+/// so it never depends on what the OS has.
+abstract final class Zones {
+  static bool _loaded = false;
+
+  static void _load() {
+    if (_loaded) return;
+
+    tzdata.initializeTimeZones();
+    _loaded = true;
+  }
+
+  /// Whether [name] is a zone of the database (`America/Caracas`, `UTC`).
+  static bool known(String name) {
+    _load();
+
+    return name == "UTC" || tz.timeZoneDatabase.locations.containsKey(name);
+  }
+
+  /// The day [instant] falls on in [zone], as the UTC instants it starts and ends at (end
+  /// excluded). A day isn't always 24 hours: daylight saving time makes some 23 or 25.
+  static (DateTime, DateTime) dayOf(String zone, DateTime instant) {
+    _load();
+
+    final location = zone == "UTC" ? tz.UTC : tz.getLocation(zone);
+    final local = tz.TZDateTime.from(instant, location);
+    final start = tz.TZDateTime(location, local.year, local.month, local.day);
+    final end = tz.TZDateTime(location, local.year, local.month, local.day + 1);
+
+    return (start.toUtc(), end.toUtc());
+  }
+}
