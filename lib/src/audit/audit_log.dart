@@ -25,6 +25,13 @@ abstract final class AuditKinds {
   static const pairingFailed = "pairing.failed";
   static const engineUnlocked = "engine.unlocked";
   static const paymentVoided = "money.payment_voided";
+  static const methodRemoved = "money.method_removed";
+
+  /// A scope's sealed key was made, by its first holder's sign in (plan §6.3).
+  static const sealedKeyCreated = "sealed.key_created";
+
+  /// Sealed fields were read (plan §6.6): which scope, what and how many rows.
+  static const sealedRead = "sealed.read";
 }
 
 final class AuditEntry {

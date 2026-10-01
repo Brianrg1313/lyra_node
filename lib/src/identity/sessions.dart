@@ -183,7 +183,7 @@ final class Sessions {
   /// access tokens go with [forgetDevice].
   static void endForDevice(Database db, String deviceId, {required String reason, required DateTime now}) {
     db.execute(
-      "UPDATE sessions SET ended = ?, end_reason = ? WHERE device = ? AND ended IS NULL",
+      "UPDATE sessions SET ended = ?, end_reason = ?, sealed = NULL WHERE device = ? AND ended IS NULL",
       [now.toUtc().toIso8601String(), reason, deviceId],
     );
   }
@@ -191,13 +191,17 @@ final class Sessions {
   /// Drops the access tokens of [deviceId] (after its revocation committed).
   void forgetDevice(String deviceId) => _access.removeWhere((_, grant) => grant.deviceId == deviceId);
 
+  /// The account [sessionId] belongs to, or null when there is no such session.
+  String? accountOf(String sessionId) =>
+    _db.select("SELECT account FROM sessions WHERE id = ?", [sessionId]).firstOrNull?["account"] as String?;
+
   /// Whether [sessionId] is still open (a bound connection checks it on every frame, S-23).
   bool isOpen(String sessionId) =>
     _db.select("SELECT 1 FROM sessions WHERE id = ? AND ended IS NULL", [sessionId]).isNotEmpty;
 
   void _end(Database db, String sessionId, String reason) {
     db.execute(
-      "UPDATE sessions SET ended = ?, end_reason = ? WHERE id = ? AND ended IS NULL",
+      "UPDATE sessions SET ended = ?, end_reason = ?, sealed = NULL WHERE id = ? AND ended IS NULL",
       [_now().toUtc().toIso8601String(), reason, sessionId],
     );
     _access.removeWhere((_, grant) => grant.sessionId == sessionId);

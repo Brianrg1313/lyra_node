@@ -135,6 +135,9 @@ final class Business {
     return Catalogs.country(row["country"] as String)?["timezone"] as String? ?? "UTC";
   }
 
+  /// The country the company operates in (ISO 3166-1 alpha-2): which payment rails it is offered.
+  String get country => _company["country"] as String;
+
   /// The company's language (`es`, `en`, …): what catalogue texts are named in (B-22).
   String get language => _company["language"] as String;
 

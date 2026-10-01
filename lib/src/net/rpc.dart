@@ -37,6 +37,7 @@ final class OpRule {
     this.permission,
     this.masterOnly = false,
     this.whileLocked = false,
+    this.sealedArgs = const {},
   });
 
   final Future<Object?> Function(OpCall call) handler;
@@ -50,14 +51,25 @@ final class OpRule {
 
   /// Served while the engine is locked (plan §6.2).
   final bool whileLocked;
+
+  /// Args left out of the `commandId` ledger's hash: a sealed field (plan §6.3) is often a phone
+  /// or an id number, few enough guesses that its plain hash would give it away. The ledger keeps
+  /// the answer in clear, so such an op answers without them.
+  final Set<String> sealedArgs;
+
+  /// [args] as the ledger hashes them.
+  Map<String, Object?> hashed(Map<String, Object?> args) => sealedArgs.isEmpty
+    ? args
+    : {for (final MapEntry(:key, :value) in args.entries) if (!sealedArgs.contains(key)) key: value};
 }
 
 /// One request being served: its arguments and the connection it came on.
 final class OpCall {
-  OpCall(this.connection, this.request);
+  OpCall(this.connection, this.request, this.rule);
 
   final RpcConnection connection;
   final RpcRequest request;
+  final OpRule rule;
 
   Map<String, Object?> get args => request.args;
 
@@ -83,12 +95,13 @@ final class OpCall {
   T write<T extends Object?>(T Function() body) => engine.store.write((db) {
     final ledger = CommandLedger(db);
     final commandId = request.commandId!;
-    final kept = ledger.replay(commandId, request.op, args);
+    final hashed = rule.hashed(args);
+    final kept = ledger.replay(commandId, request.op, hashed);
 
     if (kept.found) return kept.answer as T;
 
     final answer = body();
-    ledger.record(commandId, request.op, args, answer, engine.now());
+    ledger.record(commandId, request.op, hashed, answer, engine.now());
 
     return answer;
   });
@@ -257,11 +270,11 @@ final class RpcConnection {
 
     try {
       if (op.needsCommandId) {
-        final kept = CommandLedger(engine!.store.db).replay(request.commandId!, request.op, request.args);
+        final kept = CommandLedger(engine!.store.db).replay(request.commandId!, request.op, rule.hashed(request.args));
         if (kept.found) return RpcResponse.ok(request.id, kept.answer);
       }
 
-      return RpcResponse.ok(request.id, await rule.handler(OpCall(this, request)));
+      return RpcResponse.ok(request.id, await rule.handler(OpCall(this, request, rule)));
     } on EngineFailure catch (failure) {
       return RpcResponse.failed(request.id, Messages.ofFailure(failure));
     } on CommandReused {

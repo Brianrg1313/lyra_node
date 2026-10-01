@@ -8,6 +8,7 @@ import '../failure.dart';
 import '../identity/devices.dart';
 import '../identity/permissions.dart';
 import '../audit/audit_log.dart';
+import '../crypto/sealed.dart';
 import '../domain/inventory/inventory.dart';
 import '../domain/inventory/spreadsheet.dart';
 import '../domain/money/finance.dart';
@@ -87,7 +88,13 @@ final Map<String, OpRule> opRules = {
   Ops.moneyPaymentsVoid.name: const OpRule(_voidPayment, permission: "finance.payments.void"),
   Ops.moneyPaymentsSearch.name: const OpRule(_payments, permission: "finance.payments.view"),
   Ops.moneyReceivables.name: const OpRule(_receivables, permission: "finance.receivables.view"),
-  Ops.moneyCurrenciesGet.name: const OpRule(_currencies, permission: "finance.methods.view"),
+  Ops.moneyMethodsList.name: const OpRule(_methods, permission: _methodsView),
+  Ops.moneyMethodsRails.name: const OpRule(_rails, permission: _methodsView),
+  Ops.moneyMethodsCreate.name:
+    const OpRule(_createMethod, permission: "finance.methods.create", sealedArgs: _sealedMethodArgs),
+  Ops.moneyMethodsEdit.name: const OpRule(_editMethod, permission: "finance.methods.edit", sealedArgs: _sealedMethodArgs),
+  Ops.moneyMethodsRemove.name: const OpRule(_removeMethod, permission: "finance.methods.delete"),
+  Ops.moneyCurrenciesGet.name: const OpRule(_currencies, permission: _methodsView),
   Ops.moneyCurrenciesSave.name: const OpRule(_saveCurrency, permission: _manageCurrencies),
   Ops.moneyCurrenciesRemove.name: const OpRule(_removeCurrency, permission: _manageCurrencies),
 };
@@ -99,6 +106,7 @@ const _editRecords = "inventory.edit_records";
 const _posView = "pos.view";
 const _salesView = "sales.view";
 const _manageCurrencies = "finance.methods.manage_currencies";
+const _methodsView = "finance.methods.view";
 
 /// `docs/app-areas.json`, area `local_server`.
 const _devicesPermission = "local_server.devices";
@@ -211,19 +219,33 @@ Future<Object?> _signIn(OpCall call) async {
 
   if (!server.allowSignIn(device.id)) throw const EngineFailure(ErrorCodes.rateLimited, {"retryAfter": 60});
 
-  final account = await call.engine.accounts.verifyPassword(
-    call.text("login"),
-    call.text("password", max: 1024),
-    device: device.id,
-  );
+  final password = call.text("password", max: 1024);
+  final account = await call.engine.accounts.verifyPassword(call.text("login"), password, device: device.id);
   final tokens = call.engine.sessions.open(accountId: account.id, deviceId: device.id);
+
+  // The sealed keys this person holds open with their password, and only here (plan §6.3).
+  await call.engine.sealed.signedIn(account, password, sessionId: tokens.sessionId, refreshToken: tokens.refreshToken);
 
   return {...tokens.toJson(), "accountId": account.id, "mustChangePassword": account.mustChangePassword};
 }
 
 /// `auth.refresh {refreshToken}` (S-21).
-Future<Object?> _refresh(OpCall call) async =>
-  call.engine.sessions.refresh(call.text("refreshToken"), deviceId: call.device.id).toJson();
+Future<Object?> _refresh(OpCall call) async {
+  final engine = call.engine;
+  final previous = call.text("refreshToken");
+  final tokens = engine.sessions.refresh(previous, deviceId: call.device.id);
+  final account = engine.accounts.byId(engine.sessions.accountOf(tokens.sessionId) ?? "");
+
+  // The session's sealed keys move to the new token (and come back after a restart).
+  await engine.sealed.refreshed(
+    tokens.sessionId,
+    grants: account?.grants ?? const {},
+    previous: previous,
+    next: tokens.refreshToken,
+  );
+
+  return tokens.toJson();
+}
 
 Future<Object?> _signOut(OpCall call) async {
   call.engine.sessions.end(call.session.sessionId);
@@ -235,14 +257,19 @@ Future<Object?> _signOut(OpCall call) async {
 /// `account.changePassword {current, password}` (S-9): every other session of the account ends.
 Future<Object?> _changePassword(OpCall call) async {
   final accountId = call.session.accountId;
+  final current = call.text("current", max: 1024);
+  final password = call.text("password", max: 1024);
   final hash = await call.engine.accounts.newPasswordHash(
     accountId,
-    current: call.text("current", max: 1024),
-    password: call.text("password", max: 1024),
+    current: current,
+    password: password,
     device: call.device.id,
   );
+  // The private key of the sealed fields moves to the new password in the same write.
+  final wrap = await call.engine.sealed.rewrap(accountId, current: current, password: password);
   final answer = call.write(() {
     call.engine.accounts.setPassword(accountId, hash, device: call.device.id);
+    if (wrap != null) call.engine.sealed.save(wrap);
     return const <String, Object?>{};
   });
 
@@ -716,6 +743,47 @@ Future<Object?> _receivables(OpCall call) async {
 
   return call.engine.finance.receivables(page: page, size: size, open: _bool(call, "open"));
 }
+
+/// The account fields sealed with the `payments` key (M-45).
+const _sealedMethodArgs = {"holder", "document", "account"};
+
+/// `money.methods.list` (M-45): needs the session's `payments` key (`sealed_locked`).
+Future<Object?> _methods(OpCall call) async => call.engine.methods.list(
+  call.engine.sealed.key(call.session.sessionId, SealedScope.payments),
+  actor: call.session.accountId,
+  device: call.device.id,
+);
+
+/// `money.methods.rails` (M-40).
+Future<Object?> _rails(OpCall call) async => call.engine.methods.rails();
+
+/// `money.methods.create` (M-40 to M-43). Sealing is asynchronous, so the account is checked and
+/// sealed before the write.
+Future<Object?> _createMethod(OpCall call) async {
+  final draft = await call.engine.methods.draftCreate(
+    call.args,
+    call.engine.sealed.key(call.session.sessionId, SealedScope.payments),
+  );
+
+  return call.write(() => call.engine.methods.save(draft, actor: call.session.accountId, device: call.device.id));
+}
+
+/// `money.methods.edit {id, …}`: a key left out keeps its value, `null` clears it.
+Future<Object?> _editMethod(OpCall call) async {
+  final draft = await call.engine.methods.draftEdit(
+    call.args,
+    call.engine.sealed.key(call.session.sessionId, SealedScope.payments),
+  );
+
+  return call.write(() => call.engine.methods.save(draft, actor: call.session.accountId, device: call.device.id));
+}
+
+/// `money.methods.remove {id}` (M-44).
+Future<Object?> _removeMethod(OpCall call) async => call.write(() => call.engine.methods.remove(
+  call.text("id", max: 64),
+  actor: call.session.accountId,
+  device: call.device.id,
+));
 
 Future<Object?> _currencies(OpCall call) async => call.engine.finance.currencies();
 

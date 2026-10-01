@@ -3,7 +3,7 @@
 **Path** `E:/andromeda/frontend/packages/lyra_node` (own git repo, pure Dart, no Flutter)
 **Role** The engine that runs on the master (`lyra/app/docs/plan-offline-lan.md` §3, §8): one company, encrypted,
 one writer. Phase 2 built storage, keys, oplog, identities, audit and the process lifecycle; phase 3 the LAN server
-(TLS, pairing, RPC, events, files, mDNS); phase 4 adds the domains one per release (business, inventory and stock, import, POS, sales, finance so far). Rules come from `lyra/app/docs/offline/specs/*`, never from backend code (plan principle 1).
+(TLS, pairing, RPC, events, files, mDNS); phase 4 adds the domains one per release (business, inventory and stock, import, POS, sales, finance and its accounts so far). Rules come from `lyra/app/docs/offline/specs/*`, never from backend code (plan principle 1).
 **Used by** `lyra/app` through the executable only (`LocalServerService`), never as a Dart import.
 
 ## Files
@@ -13,7 +13,7 @@ one writer. Phase 2 built storage, keys, oplog, identities, audit and the proces
 - `lib/lyra_node.dart` — barrel (for `bin/` and tests).
 - `lib/src/engine.dart` — `Engine` (`setup` with the owner and the company, `open`, `recover`, `close`, `controlKey`,
   `enrollMaster`, `prepareTransport`; holds `sessions`, `events`, `authority`, `files`, `business`, `inventory`,
-  `stock`, `pos`, `sales`, `finance`), `OwnerDraft`,
+  `stock`, `pos`, `sales`, `finance`, `methods`, `sealed`), `OwnerDraft`,
   `DeviceDraft`, `EnrolledDevice`,
   `engineVersion`, `minAppVersion`.
 - `lib/src/failure.dart` — `EngineFailure` (a rule's refusal: stable `code` + `data`, no message).
@@ -24,6 +24,10 @@ one writer. Phase 2 built storage, keys, oplog, identities, audit and the proces
   `unlock`, `recover`, `rewrap`), `Keyring` (DEK in memory, `databaseKey`, `derive`), `UnlockMode`, `KeyringError`.
 - `lib/src/crypto/recovery.dart` — `RecoveryKey` (256 bits as 24 BIP-39 words, checksum, 4-letter prefixes).
 - `lib/src/crypto/wordlist.dart` — the BIP-39 English list.
+- `lib/src/crypto/sealed.dart` — `SealedKeys` (plan §6.3: an X25519 pair per account sealed by its password, each
+  scope's key wrapped to its holders and to the recovery key, a session's keys sealed by its refresh token;
+  `signedIn`, `refreshed`, `key`, `rewrap` + `save`, `setRecovery`, `recover`, `sealJson` / `openJson`), `SealedScope`
+  (`hr`, `payments`), `AccountKeyWrap`.
 - `lib/src/crypto/vault.dart` — `KeyVault` (`platform`), `WindowsVault` (DPAPI, FFI), `MacVault` (`security -i`),
   `LinuxVault` (`secret-tool`), `MemoryVault` (tests).
 - `lib/src/storage/store.dart` — `Store` (SQLCipher open with a raw key, refuses a library without cipher; WAL,
@@ -43,6 +47,9 @@ one writer. Phase 2 built storage, keys, oplog, identities, audit and the proces
 - `lib/src/storage/migrations/m005_pos.dart` — `pos_invoices`, `pos_lines` (a line's id is its hold's), `pos_series`.
 - `lib/src/storage/migrations/m006_money.dart` — `money_payments` (never edited: voided in place), `money_currencies`
   (one row per currency ever added, `active`).
+- `lib/src/storage/migrations/m007_sealed.dart` — `account_keys`, `sealed_keys`, `sessions.sealed`.
+- `lib/src/storage/migrations/m008_money_methods.dart` — `money_methods` (`holder`, `document`, `account` in one sealed
+  blob).
 - `lib/src/domain/inventory/inventory.dart` — `Inventory`: tables (templates, primary flag), fields (dense positions,
   re-typing, width alone), records (checked cells, SKU, counter, text search), images; reads for the ledger
   (`product`, `primaryTable`): `inventory.md`.
@@ -62,7 +69,11 @@ one writer. Phase 2 built storage, keys, oplog, identities, audit and the proces
   `fulfil`; `measure` and `announce` of `sale/progress`, which `Pos` calls on its writes): `sales.md`.
 - `lib/src/domain/money/finance.dart` — `Finance` (`catalog`, `record` and `voidPayment` (audited), `search` with the
   filter's totals, `summary` beside the closed tickets, `receivables` measured from settlements, `currencies` with
-  custom rates; `credit` off): `money.md`.
+  custom rates; `credit` off; a payment names an account): `money.md`.
+- `lib/src/domain/money/methods.dart` — `MoneyMethods` (`rails`, `list` (sealed, audited), `draftCreate` / `draftEdit`
+  checked and sealed before `save`, `remove`), `MethodDraft`: `money.md` money.method.
+- `lib/src/domain/money/rails.dart` — `Rails` (the cloud's rails, requirement sheets and bank, document and network
+  lists as of 2026-09; `offered`, `available`, `options`, `sheet`, `format`, `document`), `RailField`.
 - `lib/src/oplog/hlc.dart` — `Hlc` (packed, sortable), `HlcClock` (never backwards, `maxDrift`), `ClockDrift`.
 - `lib/src/oplog/oplog.dart` — `Oplog` (`append` inside the write, `since`, `lastSeq`, `lastHlc`), `OplogEntry`.
 - `lib/src/oplog/commands.dart` — `CommandLedger` (`commandId` idempotence, 30 days), `CommandReused`.
@@ -80,8 +91,8 @@ one writer. Phase 2 built storage, keys, oplog, identities, audit and the proces
   (`transport.json`, sealed with a control-key subkey: what TLS needs while locked).
 - `lib/src/net/server.dart` — `LanServer` (TLS 1.3 only; `/rpc`, `/pair`, `/f`, web bundle; revoked certificates and
   foreign `Origin`s refused before the upgrade; locked mode).
-- `lib/src/net/rpc.dart` — `RpcConnection` (hello first, gates, rate limit, session binding, event stream), `OpRule`,
-  `OpCall` (`write` = change + `commandId` answer in one transaction), `Gate`.
+- `lib/src/net/rpc.dart` — `RpcConnection` (hello first, gates, rate limit, session binding, event stream), `OpRule`
+  (`sealedArgs` kept out of the ledger's hash), `OpCall` (`write` = change + `commandId` answer in one transaction), `Gate`.
 - `lib/src/net/ops.dart` — `opRules`: every op this engine serves, with its gate and permission.
 - `lib/src/net/pairing.dart` — `PairingDesk` (the live ticket, SPAKE2 master side, 3 failures void it).
 - `lib/src/net/events.dart` — `EventLog` (append inside a write for a permission or `anyOf` several, or for an
@@ -116,6 +127,9 @@ one writer. Phase 2 built storage, keys, oplog, identities, audit and the proces
   refusals, the detail of an invoice and of a ticket, `sales.view_all` on the list, detail, write and notices.
 - `test/finance_test.dart` — money over the LAN: the catalogue offline, recording and voiding with their refusals and
   the audit, the history's order and totals, the summary beside the register, receivables, currencies, permissions.
+- `test/methods_test.dart` — the sealed keys (first holder, recovery wrap, refresh and restart, grants, password
+  change) and the accounts over the LAN: rails per country, sheets, nothing sealed in clear at rest (rows, ledger,
+  oplog), refusals, edits, payments naming one, a session without the key, permissions.
 - `test/import_test.dart` — importing: `.csv` / `.xlsx` reading, the typing rules, both steps over the LAN with their
   events and opening balances, normalizing, limits.
 - `test/discovery_test.dart` — mDNS answers (and a live lookup, tag `network`).
@@ -128,6 +142,9 @@ one writer. Phase 2 built storage, keys, oplog, identities, audit and the proces
 - Nothing is ever written unencrypted: `Store.open` refuses a SQLite without SQLCipher (`hooks.user_defines` in
   `pubspec.yaml` picks it), and every secret at rest is wrapped (`Envelope`, DPAPI/Keychain/libsecret).
 - Only `Keyring` holds the DEK; every key in use is `Keyring.derive(<purpose>)`. A new purpose string is a new key.
+  The sealed keys are the exception on purpose: they are **not** derived from the DEK, so the DEK alone can't open
+  them (plan §6.3). A sealed value is never written in clear anywhere: not in the oplog, not in a write's kept
+  answer (`OpRule.sealedArgs`).
 - A change, its oplog entry, its audit entry and its `commandId` answer are written in the **same** `Store.write`
   (a nested `write` joins the running one; write ops commit through `OpCall.write`).
 - Migrations are forward only: a released one is never edited.

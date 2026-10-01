@@ -8,6 +8,8 @@ import 'migrations/m003_business.dart';
 import 'migrations/m004_inventory.dart';
 import 'migrations/m005_pos.dart';
 import 'migrations/m006_money.dart';
+import 'migrations/m007_sealed.dart';
+import 'migrations/m008_money_methods.dart';
 import 'store.dart';
 
 /// One schema step. [sql] is plain SQLite (several statements). Kept as Dart constants, not
@@ -22,7 +24,8 @@ final class Migration {
 
 /// Every migration, in order. **Forward only**: a released migration is never edited; a fix is
 /// a new one.
-const List<Migration> migrations = [m001Core, m002Network, m003Business, m004Inventory, m005Pos, m006Money];
+const List<Migration> migrations = [m001Core, m002Network, m003Business, m004Inventory, m005Pos, m006Money,
+  m007Sealed, m008MoneyMethods];
 
 /// The database was written by a newer engine. Opening it could lose what that version added,
 /// so it's refused (plan §10.2): update the app on the master.

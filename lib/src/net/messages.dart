@@ -75,6 +75,11 @@ abstract final class Messages {
     "is_main": "That is already the company's main currency.",
     "invalid_rate": "The rate must be a number greater than zero.",
     "in_use": "An account still takes payments in that currency.",
+    "sealed_locked": "Account details are protected. Sign out and sign in again with your password to see them.",
+    "unknown_rail": "That payment method isn't offered in the company's country.",
+    "invalid_option": "Pick one of the options offered for that field.",
+    "invalid_fee": "The commission must be more than zero, and below 100 as a percent.",
+    "too_many_methods": "A company can keep up to 40 payment accounts. Remove one first.",
   };
 
   /// Codes whose client must go somewhere (`ErrorActions`).

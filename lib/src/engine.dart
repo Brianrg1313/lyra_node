@@ -7,11 +7,13 @@ import 'package:lyra_protocol/lyra_protocol.dart' show PairingDevice;
 import 'audit/audit_log.dart';
 import 'crypto/keyring.dart';
 import 'crypto/recovery.dart';
+import 'crypto/sealed.dart';
 import 'crypto/secrets.dart';
 import 'crypto/vault.dart';
 import 'domain/business/business.dart';
 import 'domain/inventory/inventory.dart';
 import 'domain/money/finance.dart';
+import 'domain/money/methods.dart';
 import 'domain/pos/pos.dart';
 import 'domain/sales/sales.dart';
 import 'domain/stock/stock.dart';
@@ -147,6 +149,12 @@ final class Engine {
   late final Sales sales = Sales(store, clock, pos, business, now: _now);
 
   late final Finance finance = Finance(store, clock, business, now: _now);
+
+  late final MoneyMethods methods = MoneyMethods(store, clock, business, now: _now);
+
+  /// The keys of the sealed fields each session opened (plan §6.3): one instance for the engine's
+  /// life, like [sessions].
+  late final SealedKeys sealed = SealedKeys(store, params: _hasher.params, now: _now);
 
   Devices get devices => Devices(store, clock, now: _now);
 
@@ -288,6 +296,8 @@ final class Engine {
         }
       });
 
+      await SealedKeys.setRecovery(store, created.recovery);
+
       final account = await Accounts(store, hlc, hasher: hasher, now: clock).createOwner(
         username: owner.username,
         password: owner.password,
@@ -393,6 +403,8 @@ final class Engine {
       final store = Store.open(paths.database, await keyring.databaseKey());
 
       try {
+        // A master set up before the sealed keys gets its recovery wrap from here on.
+        await SealedKeys.setRecovery(store, key);
         store.write((db) => AuditLog(db, now: now).append(
           AuditKinds.keyringRecovered,
           data: {"mode": passphrase == null ? UnlockMode.unattended.name : UnlockMode.passphrase.name},
@@ -412,6 +424,7 @@ final class Engine {
       store.checkpoint();
     } finally {
       store.close();
+      sealed.dispose();
       _keyring.dispose();
     }
   }

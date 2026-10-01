@@ -12,6 +12,7 @@ import '../../storage/store.dart';
 import '../business/business.dart';
 import '../business/zones.dart';
 import '../pos/pos.dart';
+import 'rails.dart';
 
 /// The company's money (`money.md`): payments recorded by hand, the summary, the receivables and
 /// the exchange currencies.
@@ -70,14 +71,11 @@ final class Finance {
       final amount = args["amount"];
       if (amount is! int || amount <= 0 || amount >= 1000000000000000) throw const EngineFailure("invalid_amount");
 
-      if (args["accountId"] != null) {
-        // The company's accounts arrive with their sealed fields (`money.methods.*`); until then a
-        // master has none to name.
-        throw const EngineFailure("unknown_account");
-      }
-      final method = args["method"];
+      final account = _accountOf(args["accountId"]);
+      final method = args["method"] ?? account?.$2;
       final kind = method is String ? Settlements.kinds[method] : null;
       if (kind == null || (kind.$3 && !credit)) throw const EngineFailure("unknown_method");
+      if (account != null && account.$2 != method) throw const EngineFailure("method_mismatch");
 
       final reference = _text(args["reference"], "reference", MoneyLimits.maxReference);
       final note = _text(args["note"], "note", MoneyLimits.maxNote);
@@ -90,10 +88,10 @@ final class Finance {
       final created = _instant(_now());
 
       db.execute(
-        "INSERT INTO money_payments (id, concept, direction, amount, currency, method, reference, counterpart, "
-        "ticket_id, note, date, registered_by, device, created, created_hlc, updated_hlc) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        [id, concept, direction, amount, _business.currency, method, reference,
+        "INSERT INTO money_payments (id, concept, direction, amount, currency, method, account_id, reference, "
+        "counterpart, ticket_id, note, date, registered_by, device, created, created_hlc, updated_hlc) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        [id, concept, direction, amount, _business.currency, method, account?.$1, reference,
           counterpart == null ? null : jsonEncode(counterpart), ticket, note, date, actor, device, created,
           stamp.pack(), stamp.pack()],
       );
@@ -408,6 +406,9 @@ final class Finance {
       final code = currency.trim().toUpperCase();
       final found = _db.select("SELECT 1 FROM money_currencies WHERE currency = ? AND active = 1", [code]);
       if (found.isEmpty) throw const EngineFailure(ErrorCodes.notFound);
+      if (_db.select("SELECT 1 FROM money_methods WHERE currency = ? AND active = 1", [code]).isNotEmpty) {
+        throw const EngineFailure("in_use");
+      }
 
       final stamp = _clock.tick();
       db.execute("UPDATE money_currencies SET active = 0, updated_hlc = ? WHERE currency = ?", [stamp.pack(), code]);
@@ -418,6 +419,32 @@ final class Finance {
     });
 
   // ---------------------------------------------------------------- internals
+
+  /// M-4: the active account [raw] names, as `(id, settlement kind)`; null when none is named.
+  (String, String)? _accountOf(Object? raw) {
+    if (raw == null) return null;
+
+    final row = raw is String
+      ? _db.select("SELECT id, method FROM money_methods WHERE id = ? AND active = 1", [raw]).firstOrNull
+      : null;
+    if (row == null) throw const EngineFailure("unknown_account");
+
+    return (row["id"] as String, row["method"] as String);
+  }
+
+  /// What a payment's account is called: the company's label, else its rail's name. A removed
+  /// account still reads (M-44).
+  String? _accountLabel(String? id) {
+    if (id == null) return null;
+
+    final row = _db.select("SELECT code, label FROM money_methods WHERE id = ?", [id]).firstOrNull;
+    if (row == null) return null;
+
+    final code = row["code"] as String;
+
+    return row["label"] as String? ??
+      (Rails.kinds.containsKey(code) ? Rails.row(code, _business.language)["name"] as String? : code);
+  }
 
   Row _row(String id) {
     final row = _db.select(
@@ -452,7 +479,8 @@ final class Finance {
       "currency": row["currency"],
       "method": row["method"],
       "methodName": Settlements.name(row["method"] as String, language),
-      "account": null,
+      if (!flat) "accountId": row["account_id"],
+      "account": _accountLabel(row["account_id"] as String?),
       "reference": row["reference"],
       "counterpart": flat ? (counterpart?["name"] ?? counterpart?["contact"]) : counterpart,
       "ticket": code,
