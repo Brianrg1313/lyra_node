@@ -5,6 +5,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:image/image.dart' as img;
 import 'package:lyra_node/lyra_node.dart';
 import 'package:lyra_protocol/lyra_protocol.dart';
 import 'package:test/test.dart';
@@ -23,7 +24,7 @@ void main() {
   final web = Platform.environment["LYRA_WEB"];
   final chrome = Platform.environment["CHROME"] ?? r"C:\Program Files\Google\Chrome\Application\chrome.exe";
 
-  test('a browser pairs by code, signs in, opens the company, and proves itself again after a reload', () async {
+  test('a browser pairs by code, signs in, opens the company and the inventory with its photos, and proves itself again after a reload', () async {
     final master = await TestMaster.start(webRoot: web);
     final pin = base64.encode(Hashes.sha256(EcKeyPair.fromPem(master.server.transport.serverKeyPem).spki));
     final browser = await Browser.launch(chrome, pin: pin);
@@ -68,11 +69,47 @@ void main() {
     await browser.waitForView();
     await browser.waitFor(company.name);
 
-    final (admin, _) = await master.signIn();
+    // The inventory release: what another device wrote shows in the browser, the product's photo
+    // fetched from the master's /f with the session's token.
+    final (admin, tokens) = await master.signIn();
+    final tableId = (await admin.call(Ops.inventoryTablesCreate,
+      args: {"title": "Coffee shelf", "color": "0xFF60A5FA", "template": "FOOD"}, commandId: newId()) as Map)["id"] as String;
+    final fields = (((await admin.call(Ops.inventoryTablesStructure, args: {"id": tableId}) as Map)["fields"] as Map)["values"] as List)
+      .cast<List>();
+    final title = fields.firstWhere((field) => field[2] == FieldTypes.title).first as String;
+    final product = (await admin.call(Ops.inventoryRecordsCreate,
+      args: {"tableId": tableId, "data": {title: "Colombian roast"}}, commandId: newId()) as Map)["id"] as String;
+    await admin.call(Ops.stockMove,
+      args: {"operation": "add", "tableId": tableId, "productId": product, "quantity": 7}, commandId: newId());
+    final photo = await upload(master, tokens["accessToken"] as String, img.encodePng(img.Image(width: 640, height: 640)));
+    await admin.call(Ops.inventoryImagesAdd,
+      args: {"tableId": tableId, "productId": product, "fileId": photo}, commandId: newId());
+
+    await browser.open("https://127.0.0.1:${master.port}/home/inventory");
+    await browser.waitForView();
+    await browser.waitFor("Coffee shelf");
+    await browser.waitFor("Colombian roast");
+    await browser.waitUntil("performance.getEntriesByType('resource').some(e => e.name.includes('/f/$photo?size=320'))");
+
     final paired = master.openEngine.devices.list().firstWhere((device) => device.name == "Lyra Web");
     await admin.call(Ops.devicesRevoke, args: {"id": paired.id}, commandId: newId());
     await browser.waitFor("This device was removed");
   }, skip: web == null ? "set LYRA_WEB to a LAN web build" : false, timeout: const Timeout(Duration(minutes: 3)));
+}
+
+/// A `product_image` upload over `PUT /f`, as another device of the company.
+Future<String> upload(TestMaster master, String token, List<int> bytes) async {
+  final http = HttpClient(context: master.master.context);
+  try {
+    final request = await http.openUrl("PUT", Uri.parse("https://127.0.0.1:${master.port}/f"));
+    request.headers.set(HttpHeaders.authorizationHeader, "Bearer $token");
+    request.headers.set("X-Lyra-Purpose", "product_image");
+    request.add(bytes);
+
+    return (jsonDecode(await utf8.decodeStream(await request.close())) as Map)["fileId"] as String;
+  } finally {
+    http.close(force: true);
+  }
 }
 
 /// Headless Chrome driven over the DevTools protocol.
@@ -196,6 +233,19 @@ final class Browser {
 
     await screenshot("timeout.png");
     throw TimeoutException("'$text' never showed");
+  }
+
+  /// Waits until [script] is true in the page.
+  Future<void> waitUntil(String script, {Duration timeout = const Duration(seconds: 30)}) async {
+    final end = DateTime.now().add(timeout);
+
+    while (DateTime.now().isBefore(end)) {
+      if (await evaluate(script) == true) return;
+      await Future<void>.delayed(const Duration(milliseconds: 500));
+    }
+
+    await screenshot("timeout.png");
+    throw TimeoutException("never true: $script");
   }
 
   Future<void> screenshot(String name) async {

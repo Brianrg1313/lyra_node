@@ -1,7 +1,10 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:isolate';
 import 'dart:typed_data';
 
+import 'package:image/image.dart' as img;
+import 'package:lyra_protocol/lyra_protocol.dart' show FileSizes;
 import 'package:path/path.dart' as p;
 
 import '../crypto/envelope.dart';
@@ -79,6 +82,17 @@ final class FileStore {
     Directory(_folder).createSync(recursive: true);
     file.writeAsBytesSync(sealed, flush: true);
 
+    if (_images.contains(type)) {
+      final small = await _shrink(bytes, type);
+      if (small != null) {
+        final name = "$id@$thumbnailWidth";
+        File(p.join(_folder, name)).writeAsBytesSync(
+          await Envelope.seal(_key, small.bytes, context: "lyra/file/$name"),
+          flush: true,
+        );
+      }
+    }
+
     try {
       _store.write((db) => db.execute(
         "INSERT INTO files (id, purpose, content_type, size, owner, created) VALUES (?, ?, ?, ?, ?, ?)",
@@ -86,6 +100,7 @@ final class FileStore {
       ));
     } catch (_) {
       file.deleteSync();
+      _deleteThumbnail(id);
       rethrow;
     }
 
@@ -94,7 +109,10 @@ final class FileStore {
 
   /// Reads [id] for [account] holding [grants]: the file's permission once a record references
   /// it, its uploader until then. Anything else is `not_found`, so ids can't be probed.
-  Future<StoredFile> get(String id, {required String account, required Set<String> grants}) async {
+  ///
+  /// [size] asks for the thumbnail (`protocol-v1.md` §6): an image's is [thumbnailWidth] wide;
+  /// a file without one (small already, or not an image) answers the original.
+  Future<StoredFile> get(String id, {required String account, required Set<String> grants, int? size}) async {
     final rows = _store.db.select("SELECT * FROM files WHERE id = ?", [id]);
     if (rows.isEmpty) throw const EngineFailure("not_found");
 
@@ -104,6 +122,13 @@ final class FileStore {
     final file = File(p.join(_folder, id));
 
     if (!allowed || !file.existsSync()) throw const EngineFailure("not_found");
+
+    final small = File(p.join(_folder, "$id@$thumbnailWidth"));
+    if (size != null && size <= thumbnailWidth && small.existsSync()) {
+      final bytes = await Envelope.open(_key, small.readAsBytesSync(), context: "lyra/file/$id@$thumbnailWidth");
+
+      return StoredFile(id: id, contentType: sniff(bytes) ?? "image/png", bytes: bytes);
+    }
 
     return StoredFile(
       id: id,
@@ -146,9 +171,35 @@ final class FileStore {
 
       final file = File(p.join(_folder, id));
       if (file.existsSync()) file.deleteSync();
+      _deleteThumbnail(id);
     }
 
     return ids.length;
+  }
+
+  void _deleteThumbnail(String id) {
+    final small = File(p.join(_folder, "$id@$thumbnailWidth"));
+    if (small.existsSync()) small.deleteSync();
+  }
+
+  /// How wide a stored thumbnail is: what a product tile, a summary row or a logo draw.
+  static const thumbnailWidth = FileSizes.thumbnail;
+
+  /// [bytes] scaled down to [thumbnailWidth], or null when they are that small already or can't
+  /// be decoded. A JPEG stays a JPEG; the rest become PNG, which keeps a logo's transparency.
+  static ({Uint8List bytes})? thumbnail(Uint8List bytes, String type) {
+    final img.Image? decoded;
+    try {
+      decoded = img.decodeImage(bytes);
+    } on Object {
+      // Bytes that start like an image and aren't one: kept as uploaded, served without a thumbnail.
+      return null;
+    }
+    if (decoded == null || decoded.width <= thumbnailWidth) return null;
+
+    final small = img.copyResize(decoded, width: thumbnailWidth, interpolation: img.Interpolation.average);
+
+    return (bytes: type == "image/jpeg" ? img.encodeJpg(small, quality: 85) : img.encodePng(small));
   }
 
   /// The type the bytes really are, from their first bytes, or null when it's none this
@@ -189,3 +240,7 @@ final class FileStore {
     return true;
   }
 }
+
+/// [FileStore.thumbnail] off the server's isolate: decoding a 10 MB photo would stall every
+/// connection. Top level, so the closure carries only the bytes.
+Future<({Uint8List bytes})?> _shrink(Uint8List bytes, String type) => Isolate.run(() => FileStore.thumbnail(bytes, type));

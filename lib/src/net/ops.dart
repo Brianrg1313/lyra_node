@@ -7,6 +7,7 @@ import '../engine.dart';
 import '../failure.dart';
 import '../identity/devices.dart';
 import '../identity/permissions.dart';
+import '../audit/audit_log.dart';
 import 'rpc.dart';
 
 /// Every op this engine serves, with its gate (`protocol-v1.md` §9, `session.md`, `business.md`).
@@ -39,9 +40,31 @@ final Map<String, OpRule> opRules = {
   Ops.businessSetLogo.name: const OpRule(_setLogo, permission: "business.settings.edit_logo"),
   Ops.businessSiteGet.name: const OpRule(_site, permission: _businessView),
   Ops.businessSiteEdit.name: const OpRule(_editSite, permission: "business.settings.edit"),
+  Ops.inventoryTablesList.name: const OpRule(_tables, permission: _inventoryView),
+  Ops.inventoryTablesCreate.name: const OpRule(_createTable, permission: "inventory.create_table"),
+  Ops.inventoryTablesEdit.name: const OpRule(_editTable, permission: "inventory.edit_table"),
+  Ops.inventoryTablesDelete.name: const OpRule(_deleteTable, permission: "inventory.delete_table"),
+  Ops.inventoryTablesStructure.name: const OpRule(_structure, permission: _inventoryView),
+  Ops.inventoryTablesDetails.name: const OpRule(_details, permission: _inventoryView),
+  Ops.inventoryFieldsCreate.name: const OpRule(_createField, permission: _editColumns),
+  // A column's width alone is anyone's who opens the table (I-17); the handler asks for more.
+  Ops.inventoryFieldsEdit.name: const OpRule(_editField, permission: _inventoryView),
+  Ops.inventoryFieldsDelete.name: const OpRule(_deleteField, permission: _editColumns),
+  Ops.inventoryRecordsList.name: const OpRule(_records, permission: _inventoryView),
+  Ops.inventoryRecordsCreate.name: const OpRule(_createRecord, permission: _editRecords),
+  Ops.inventoryRecordsEdit.name: const OpRule(_editRecord, permission: _editRecords),
+  Ops.inventoryRecordsDelete.name: const OpRule(_deleteRecord, permission: _editRecords),
+  Ops.inventoryImagesAdd.name: const OpRule(_addImage, permission: _editRecords),
+  Ops.inventoryImagesRemove.name: const OpRule(_removeImage, permission: _editRecords),
+  Ops.stockMove.name: const OpRule(_move, permission: "inventory.move_stock"),
+  Ops.stockHistory.name: const OpRule(_history, permission: _inventoryView),
+  Ops.stockSummary.name: const OpRule(_summary, permission: _inventoryView),
 };
 
 const _businessView = "business.view";
+const _inventoryView = "inventory.view";
+const _editColumns = "inventory.edit_columns";
+const _editRecords = "inventory.edit_records";
 
 /// `docs/app-areas.json`, area `local_server`.
 const _devicesPermission = "local_server.devices";
@@ -305,3 +328,128 @@ Future<Object?> _site(OpCall call) async => call.engine.business.site();
 /// `business.site.edit {changed keys}` (B-10 to B-12).
 Future<Object?> _editSite(OpCall call) async => call.write(() =>
   call.engine.business.editSite(call.args, actor: call.session.accountId, device: call.device.id));
+
+// ---------------------------------------------------------------- inventory (`inventory.md`)
+
+Future<Object?> _tables(OpCall call) async => call.engine.inventory.tables();
+
+Future<Object?> _createTable(OpCall call) async => call.write(() =>
+  call.engine.inventory.createTable(call.args, actor: call.session.accountId, device: call.device.id));
+
+Future<Object?> _editTable(OpCall call) async => call.write(() =>
+  call.engine.inventory.editTable(call.args, actor: call.session.accountId, device: call.device.id));
+
+/// `inventory.tables.delete {id}` (I-2). I-4 (open tickets) arrives with the POS release.
+Future<Object?> _deleteTable(OpCall call) async => call.write(() {
+  call.engine.inventory.deleteTable(call.text("id"), actor: call.session.accountId, device: call.device.id);
+  return const <String, Object?>{};
+});
+
+Future<Object?> _structure(OpCall call) async => call.engine.inventory.structure(call.text("id"));
+
+Future<Object?> _details(OpCall call) async => call.engine.inventory.details(call.text("id"));
+
+Future<Object?> _createField(OpCall call) async => call.write(() =>
+  call.engine.inventory.createField(call.args, actor: call.session.accountId, device: call.device.id));
+
+/// `inventory.fields.edit`: anything past the width needs `inventory.edit_columns` (I-17).
+Future<Object?> _editField(OpCall call) async {
+  final inventory = call.engine.inventory;
+  if (!inventory.onlyWidth(call.args) && !Permissions.allows(call.connection.grants, _editColumns)) {
+    throw const EngineFailure(ErrorCodes.forbidden);
+  }
+
+  return call.write(() => inventory.editField(call.args,
+    actor: call.session.accountId, device: call.device.id, decimals: _decimals(call)));
+}
+
+/// `inventory.fields.delete {id}` (I-16): recorded in the audit log with how many values went.
+Future<Object?> _deleteField(OpCall call) async => call.write(() {
+  final engine = call.engine;
+  final deleted = engine.inventory.deleteField(call.text("id"), actor: call.session.accountId, device: call.device.id);
+
+  engine.audit.append(AuditKinds.fieldDeleted, actor: call.session.accountId, data: {
+    "table": deleted.table,
+    "field": call.args["id"],
+    "name": deleted.name,
+    "values": deleted.values,
+  });
+
+  return const <String, Object?>{};
+});
+
+Future<Object?> _records(OpCall call) async => call.engine.inventory.records(
+  call.text("tableId"),
+  page: _int(call, "page", 1),
+  size: _int(call, "size", 50),
+  match: call.args["match"] == null ? "" : call.text("match", max: 200),
+);
+
+Future<Object?> _createRecord(OpCall call) async => call.write(() => call.engine.inventory.createRecord(
+  call.text("tableId"), call.args["data"],
+  decimals: _decimals(call), actor: call.session.accountId, device: call.device.id,
+));
+
+Future<Object?> _editRecord(OpCall call) async => call.write(() {
+  call.engine.inventory.editRecord(call.text("tableId"), call.text("id"), call.args["data"],
+    decimals: _decimals(call), actor: call.session.accountId, device: call.device.id);
+  return const <String, Object?>{};
+});
+
+Future<Object?> _deleteRecord(OpCall call) async => call.write(() {
+  call.engine.inventory.deleteRecord(call.text("tableId"), call.text("id"), actor: call.session.accountId, device: call.device.id);
+  return const <String, Object?>{};
+});
+
+/// `inventory.images.add {tableId, productId, fileId}` (I-30, I-31): a `product_image` upload of
+/// this account.
+Future<Object?> _addImage(OpCall call) async => call.write(() => call.engine.inventory.addImage(
+  call.text("tableId"), call.text("productId"), call.text("fileId"), call.engine.files,
+  actor: call.session.accountId, device: call.device.id,
+));
+
+Future<Object?> _removeImage(OpCall call) async => call.write(() => call.engine.inventory.removeImage(
+  call.text("tableId"), call.text("productId"), call.text("fileId", max: 2048), call.engine.files,
+  actor: call.session.accountId, device: call.device.id,
+));
+
+/// How many decimals the company's currency writes a price with (I-21).
+int _decimals(OpCall call) {
+  final currency = call.engine.business.summary()["currency"];
+
+  return Catalogs.currencyRows.where((row) => row["code"] == currency).firstOrNull?["decimals"] as int? ?? 2;
+}
+
+int _int(OpCall call, String name, int fallback) {
+  final value = call.args[name] ?? fallback;
+  if (value is! int) throw EngineFailure(ErrorCodes.invalidField, {"field": name});
+
+  return value;
+}
+
+// ---------------------------------------------------------------- stock (`stock.md`)
+
+/// `stock.move {operation, tableId, productId, quantity, reason?, note?}` (ST-10 to ST-16).
+Future<Object?> _move(OpCall call) async => call.write(() => call.engine.stock.move(
+  operation: call.text("operation", max: 16),
+  tableId: call.text("tableId"),
+  productId: call.text("productId"),
+  quantity: call.args["quantity"],
+  reason: call.args["reason"],
+  note: call.args["note"],
+  actor: call.session.accountId,
+  device: call.device.id,
+  commandId: call.request.commandId,
+));
+
+Future<Object?> _history(OpCall call) async => call.engine.stock.history(
+  call.text("productId"),
+  cursor: call.args["cursor"] == null ? null : call.text("cursor", max: 64),
+  size: _int(call, "size", 50),
+);
+
+Future<Object?> _summary(OpCall call) async => call.engine.stock.summary(
+  page: _int(call, "page", 1),
+  size: _int(call, "size", 30),
+  match: call.args["match"] == null ? "" : call.text("match", max: 200),
+);

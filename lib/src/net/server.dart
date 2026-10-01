@@ -272,7 +272,12 @@ final class LanServer {
       }
 
       if (request.method == "GET" && request.uri.pathSegments.length == 2) {
-        final file = await engine.files.get(request.uri.pathSegments[1], account: account.id, grants: account.grants);
+        final file = await engine.files.get(
+          request.uri.pathSegments[1],
+          account: account.id,
+          grants: account.grants,
+          size: int.tryParse(request.uri.queryParameters["size"] ?? ""),
+        );
 
         response.headers.contentType = ContentType.parse(file.contentType);
         response.contentLength = file.bytes.length;

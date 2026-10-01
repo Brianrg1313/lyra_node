@@ -10,6 +10,7 @@ dependencies:
   crypto: ^3.0.7
   cryptography: ^2.9.0
   ffi: ^2.2.0
+  image: ^4.10.1
   lyra_protocol:
     path: ../lyra_protocol
   path: ^1.9.1

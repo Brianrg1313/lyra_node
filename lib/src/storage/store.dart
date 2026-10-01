@@ -62,6 +62,12 @@ final class Store {
       db.execute("PRAGMA synchronous = FULL");
       db.execute("PRAGMA foreign_keys = ON");
       db.execute("PRAGMA busy_timeout = 5000");
+      db.createFunction(
+        functionName: "fold",
+        argumentCount: const AllowedArgumentCount(1),
+        deterministic: true,
+        function: (arguments) => arguments[0] is String ? fold(arguments[0] as String) : arguments[0],
+      );
     } catch (_) {
       db.close();
       rethrow;
@@ -110,3 +116,27 @@ final class Store {
 
   void close() => _db.close();
 }
+
+/// [text] for a search (README, text search): lower case, accents off, so "cafe" finds "Café".
+/// Also the SQL function `fold(x)` of every [Store].
+String fold(String text) {
+  final lower = text.toLowerCase();
+  final out = StringBuffer();
+
+  for (final rune in lower.runes) {
+    out.write(_plain[rune] ?? String.fromCharCode(rune));
+  }
+
+  return out.toString();
+}
+
+const Map<int, String> _plain = {
+  0xe0: "a", 0xe1: "a", 0xe2: "a", 0xe3: "a", 0xe4: "a", 0xe5: "a",
+  0xe7: "c",
+  0xe8: "e", 0xe9: "e", 0xea: "e", 0xeb: "e",
+  0xec: "i", 0xed: "i", 0xee: "i", 0xef: "i",
+  0xf1: "n",
+  0xf2: "o", 0xf3: "o", 0xf4: "o", 0xf5: "o", 0xf6: "o",
+  0xf9: "u", 0xfa: "u", 0xfb: "u", 0xfc: "u",
+  0xfd: "y", 0xff: "y",
+};

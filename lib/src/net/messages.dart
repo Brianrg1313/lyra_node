@@ -37,6 +37,17 @@ abstract final class Messages {
     "invalid_file": "The file is not a type or size that can be used here.",
     "invalid_point": "The location needs both a valid latitude and a valid longitude.",
     "invalid_timezone": "That time zone doesn't exist.",
+    "invalid_value": "That value doesn't fit this column.",
+    "read_only_field": "Lyra fills in this column: it can't be written by hand.",
+    "duplicate_field_type": "A table can have only one column of this type.",
+    "duplicate_sku": "Another product of this table already has that SKU.",
+    "unknown_template": "That template doesn't exist.",
+    "invalid_primary": "The main table can't be unmarked: mark another table as main instead.",
+    "too_many_images": "A product can have up to 8 photos.",
+    "untracked": "This table doesn't count stock: add a stock column first.",
+    "invalid_reason": "That reason doesn't go with this movement.",
+    "insufficient_stock": "There isn't enough stock for that.",
+    "no_primary_table": "There is no main table yet.",
   };
 
   /// Codes whose client must go somewhere (`ErrorActions`).

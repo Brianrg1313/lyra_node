@@ -10,6 +10,8 @@ import 'crypto/recovery.dart';
 import 'crypto/secrets.dart';
 import 'crypto/vault.dart';
 import 'domain/business/business.dart';
+import 'domain/inventory/inventory.dart';
+import 'domain/stock/stock.dart';
 import 'failure.dart';
 import 'identity/accounts.dart';
 import 'identity/devices.dart';
@@ -132,6 +134,10 @@ final class Engine {
   late final Accounts accounts = Accounts(store, clock, hasher: _hasher, now: _now);
 
   late final Business business = Business(store, clock, now: _now);
+
+  late final Inventory inventory = Inventory(store, clock, now: _now);
+
+  late final Stock stock = Stock(store, clock, inventory, now: _now);
 
   Devices get devices => Devices(store, clock, now: _now);
 
