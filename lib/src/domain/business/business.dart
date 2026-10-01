@@ -131,6 +131,8 @@ final class Business {
 
   String get id => _company["id"] as String;
 
+  String get name => _company["name"] as String;
+
   /// The company's zone, or its country's default one (B-9). A zone stored before the engine
   /// carried the database was only checked for its shape: one the database doesn't know reads as
   /// the country's, so "today" never fails.

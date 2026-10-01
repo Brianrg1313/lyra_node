@@ -80,6 +80,20 @@ void main() {
       await expectRefusal(create(owner, draft), "company_exists");
     });
 
+    test("creating it gives the master its name for browsers, which a rename doesn't move", () async {
+      var told = 0;
+      bare.server.onCompanyCreated = () => told++;
+      expect(bare.openEngine.lanName, isNull);
+
+      await create(owner, draft);
+
+      expect(told, 1);
+      expect(bare.openEngine.lanName, "lovelace-cafe");
+
+      await owner.call(Ops.businessEdit, args: {"name": "Babbage Bakery"}, commandId: const Uuid().v7());
+      expect(bare.openEngine.lanName, "lovelace-cafe");
+    });
+
     test('a wrong field creates nothing', () async {
       await expectRefusal(create(owner, {...draft, "currency": "ZZZ"}), ErrorCodes.invalidField);
       await expectRefusal(create(owner, {...draft, "activity": "PIRACY"}), ErrorCodes.invalidField);

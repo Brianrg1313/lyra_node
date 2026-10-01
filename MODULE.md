@@ -103,7 +103,8 @@ one writer. Phase 2 built storage, keys, oplog, identities, audit and the proces
 - `lib/src/identity/permissions.dart` — `Permissions.allows` (`session.md` P-1).
 - `lib/src/net/x509.dart` — `X509` (the two roots of the installation CA, server and device certificates), `Certificate`.
 - `lib/src/net/tls.dart` — `LocalAddresses`, `Authority` (CA key and roots in `meta`, issues), `Transport`
-  (`transport.json`, sealed with a control-key subkey: what TLS needs while locked).
+  (`transport.json`, sealed with a control-key subkey: what TLS needs while locked, the `.local` `host` too;
+  `serveFrom` swaps the certificate of a listening server).
 - `lib/src/net/server.dart` — `LanServer` (TLS 1.3 only; `/rpc`, `/pair`, `/f`, web bundle; revoked certificates and
   foreign `Origin`s refused before the upgrade; locked mode).
 - `lib/src/net/rpc.dart` — `RpcConnection` (hello first, gates, rate limit, session binding, event stream), `OpRule`
@@ -119,7 +120,8 @@ one writer. Phase 2 built storage, keys, oplog, identities, audit and the proces
   `FilePurpose`.
 - `lib/src/net/messages.dart` — `Messages` (refusal code → `RpcError` with message and action).
 - `lib/src/net/web_bundle.dart` — `WebBundle` (static web build, CSP, `marker` written into its HTML).
-- `lib/src/net/discovery.dart` — `MdnsResponder` (`_lyra._tcp.local`).
+- `lib/src/net/discovery.dart` — `MdnsResponder` (`_lyra._tcp.local`; the master's `alias` only to a question about it),
+  `LanName` (the `.local` name browsers open: from the company's name, `claim`ed against the LAN's answers).
 - `lib/src/process/paths.dart` — `NodePaths` (data folder per OS and its files).
 - `lib/src/process/lock.dart` — `InstanceLock` (exclusive OS lock, one engine per folder).
 - `lib/src/process/control.dart` — `EngineStatusFile` (`engine.state.json`, HMAC-signed), `EnginePhase`, `ControlChannel`

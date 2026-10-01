@@ -108,13 +108,15 @@ final class Authority {
   /// The names the browser root allows besides `localhost` and `.local`.
   final List<String> hostnames;
 
-  /// A server certificate for [addresses], and this computer's names the CA allows.
-  ({Certificate certificate, EcKeyPair key}) issueServer(List<InternetAddress> addresses, {DateTime? now}) {
+  /// A server certificate for [addresses], this computer's names the CA allows and [host], the
+  /// master's own `.local` name (`LanName`).
+  ({Certificate certificate, EcKeyPair key}) issueServer(List<InternetAddress> addresses, {String? host, DateTime? now}) {
     final key = EcKeyPair.generate();
     final current = LocalAddresses.hostname;
     final names = [
       if (hostnames.contains(current)) current,
       if (!current.contains(".")) "$current.local",
+      ?host,
     ];
 
     return (
@@ -147,6 +149,7 @@ final class Transport {
     required this.server,
     required this.serverKeyPem,
     required this.addresses,
+    this.host,
     this.masterDevice,
   });
 
@@ -158,6 +161,10 @@ final class Transport {
 
   /// The addresses [server] names.
   final List<String> addresses;
+
+  /// The master's `.local` name [server] carries (`LanName`), kept here so a locked engine still
+  /// announces it; none before the company exists.
+  final String? host;
 
   /// Fingerprint of the master's own device certificate: the only device `engine.unlock`
   /// and `pairing.start` accept.
@@ -177,6 +184,7 @@ final class Transport {
         server: X509.read(base64.decode(json["server"] as String)),
         serverKeyPem: json["serverKey"] as String,
         addresses: (json["addresses"] as List).cast<String>(),
+        host: json["host"] as String?,
         masterDevice: json["masterDevice"] as String?,
       );
     } on Object {
@@ -192,6 +200,7 @@ final class Transport {
       "server": base64.encode(server.der),
       "serverKey": serverKeyPem,
       "addresses": addresses,
+      "host": host,
       "masterDevice": masterDevice,
     })), context: _context);
     final temporary = File("$path.tmp");
@@ -205,26 +214,28 @@ final class Transport {
     server: server,
     serverKeyPem: serverKeyPem,
     addresses: addresses,
+    host: host,
     masterDevice: fingerprint,
   );
 
-  /// Whether the server certificate must be issued again: an address it doesn't name, or past
-  /// half its life.
-  bool needsRenewal(List<InternetAddress> current, {DateTime? now}) {
+  /// Whether the server certificate must be issued again: an address or a [host] it doesn't name,
+  /// or past half its life.
+  bool needsRenewal(List<InternetAddress> current, {String? host, DateTime? now}) {
     final at = (now ?? DateTime.now()).toUtc();
     final halfLife = server.notAfter.subtract(const Duration(days: 365 ~/ 2));
 
-    return at.isAfter(halfLife) || current.any((address) => !addresses.contains(address.address));
+    return at.isAfter(halfLife) || host != this.host || current.any((address) => !addresses.contains(address.address));
   }
 
-  static Transport issue(Authority authority, List<InternetAddress> addresses, {String? masterDevice, DateTime? now}) {
-    final issued = authority.issueServer(addresses, now: now);
+  static Transport issue(Authority authority, List<InternetAddress> addresses, {String? host, String? masterDevice, DateTime? now}) {
+    final issued = authority.issueServer(addresses, host: host, now: now);
 
     return Transport(
       ca: authority.pinned,
       server: issued.certificate,
       serverKeyPem: issued.key.privateKeyPem,
       addresses: [for (final address in addresses) address.address],
+      host: host,
       masterDevice: masterDevice,
     );
   }
@@ -232,10 +243,14 @@ final class Transport {
   /// TLS 1.3 only; the server certificate alone in the chain (a client finds the root it
   /// trusts by name: the pinned one natively, the browser one in an OS store); client
   /// certificates are asked for and must chain to the pinned root.
-  SecurityContext get context => SecurityContext(withTrustedRoots: false)
+  SecurityContext get context => serveFrom(SecurityContext(withTrustedRoots: false)
     ..minimumTlsProtocolVersion = TlsProtocolVersion.tls1_3
-    ..useCertificateChainBytes(utf8.encode(server.pem))
-    ..usePrivateKeyBytes(utf8.encode(serverKeyPem))
     ..setTrustedCertificatesBytes(utf8.encode(ca.pem))
-    ..setClientAuthoritiesBytes(utf8.encode(ca.pem));
+    ..setClientAuthoritiesBytes(utf8.encode(ca.pem)));
+
+  /// Makes [context] serve this server certificate. A context a listening socket already holds
+  /// serves it from the next handshake on, so a renewed certificate needs no new socket.
+  SecurityContext serveFrom(SecurityContext context) => context
+    ..useCertificateChainBytes(utf8.encode(server.pem))
+    ..usePrivateKeyBytes(utf8.encode(serverKeyPem));
 }

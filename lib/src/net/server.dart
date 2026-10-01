@@ -24,14 +24,14 @@ import 'web_bundle.dart';
 final class LanServer {
   LanServer({
     required this.instanceId,
-    required this.transport,
+    required Transport transport,
     this.requestedPort = defaultPort,
     this.address,
     this.webRoot,
     this.log,
     Future<Engine> Function(String passphrase)? unlock,
     Engine? engine,
-  }) : _unlock = unlock {
+  }) : _transport = transport, _unlock = unlock {
     if (engine != null) ready(engine);
   }
 
@@ -47,8 +47,18 @@ final class LanServer {
   final Future<Engine> Function(String passphrase)? _unlock;
 
   /// What TLS serves; replaced when the master device changes or the certificate is renewed
-  /// (the next connection uses it).
-  Transport transport;
+  /// (the next handshake serves it: `Transport.serveFrom`).
+  Transport get transport => _transport;
+  set transport(Transport value) {
+    _transport = value;
+    if (_context case final context?) value.serveFrom(context);
+  }
+
+  Transport _transport;
+  SecurityContext? _context;
+
+  /// Called after `business.create`: the master now has a name for browsers (`LanName`).
+  void Function()? onCompanyCreated;
 
   Engine? _engine;
   Engine? get engine => _engine;
@@ -69,7 +79,7 @@ final class LanServer {
     _http = await HttpServer.bindSecure(
       bind,
       requestedPort,
-      transport.context,
+      _context = transport.context,
       v6Only: false,
       requestClientCertificate: true,
     );

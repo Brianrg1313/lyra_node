@@ -480,6 +480,28 @@ void main() {
       expect(await get("/main.dart.js"), "// <head>");
     });
 
+    test("a certificate with the master's name is served from the next handshake, without a restart", () async {
+      final master = await TestMaster.start();
+      final engine = master.openEngine;
+      final (client, _) = await master.signIn();
+      expect((await client.call(Ops.devicesBrowserCa) as Map)["host"], isNull);
+
+      master.server.transport = await engine.prepareTransport(Uint8List.fromList(master.controlKey), host: "lovelace-cafe.local");
+
+      final context = SecurityContext(withTrustedRoots: false)
+        ..setTrustedCertificatesBytes(utf8.encode(engine.authority.pinned.pem));
+      final socket = await SecureSocket.connect("127.0.0.1", master.port, context: context);
+      final served = socket.peerCertificate!.der;
+      await socket.close();
+
+      expect(latin1.decode(served), contains("lovelace-cafe.local"));
+      expect((await client.call(Ops.devicesBrowserCa) as Map)["host"], "lovelace-cafe.local");
+      // Kept in the transport file, so a locked start still announces it; a start that names no
+      // host keeps it.
+      expect((await Transport.read(master.paths.transport, master.controlKey))!.host, "lovelace-cafe.local");
+      expect((await engine.prepareTransport(Uint8List.fromList(master.controlKey))).host, "lovelace-cafe.local");
+    });
+
     test('a signed-in device gets the browser root: same key, name-constrained', () async {
       final master = await TestMaster.start();
       final (client, _) = await master.signIn();

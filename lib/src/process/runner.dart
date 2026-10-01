@@ -111,12 +111,35 @@ final class NodeRunner {
       LanServer? server;
       MdnsResponder? mdns;
 
+      /// The master's `.local` name for browsers, claimed on the LAN (`LanName`): the one its
+      /// certificate carries. None before the company exists.
+      Future<String?> claimHost(Engine opened) async {
+        final label = opened.lanName;
+        if (label == null) return null;
+
+        final previous = (await Transport.read(paths.transport, controlKey))?.host;
+        final claimed = await LanName.claim(
+          label,
+          previous: previous?.replaceAll(RegExp(r"\.local$"), ""),
+          own: await LocalAddresses.current(),
+        );
+
+        return "$claimed.local";
+      }
+
+      /// A new address, an old certificate or a new name: issued again now that the CA is
+      /// readable, and served from the next handshake on.
+      Future<Transport> renew(Engine opened) async {
+        final transport = await opened.prepareTransport(controlKey, host: await claimHost(opened));
+        server?.transport = transport;
+        mdns?.alias = transport.host;
+
+        return transport;
+      }
+
       Future<Engine> open(String? secret) async {
         final opened = await Engine.open(paths: paths, vault: vault, passphrase: secret);
-
-        // A new address or an old certificate: issued again now that the CA is readable. The
-        // listening socket keeps the one it started with until the next start.
-        server?.transport = await opened.prepareTransport(controlKey);
+        if (server != null) await renew(opened);
 
         return opened;
       }
@@ -142,7 +165,7 @@ final class NodeRunner {
 
       final opened = engine;
       final transport = opened != null
-        ? await opened.prepareTransport(controlKey)
+        ? await renew(opened)
         : await Transport.read(paths.transport, controlKey);
 
       if (transport != null) {
@@ -155,6 +178,13 @@ final class NodeRunner {
           unlock: unlock,
           engine: engine,
         );
+        server.onCompanyCreated = () {
+          final opened = server?.engine;
+          if (opened == null) return;
+
+          unawaited(renew(opened).then((transport) => log.info("browsers open https://${transport.host}:${server?.port}"),
+            onError: (Object error) => log.error("no name for browsers: $error")));
+        };
 
         try {
           await server.start();
@@ -163,7 +193,12 @@ final class NodeRunner {
           log.info("listening on ${server.port}");
 
           if (discoverable) {
-            mdns = MdnsResponder(instanceId: keyrings.instanceId, port: server.port, addresses: await LocalAddresses.current());
+            mdns = MdnsResponder(
+              instanceId: keyrings.instanceId,
+              port: server.port,
+              addresses: await LocalAddresses.current(),
+              alias: server.transport.host,
+            );
             if (!await mdns.start()) log.info("mDNS unavailable: clients use the QR or a typed address");
           }
         } on SocketException catch (error) {

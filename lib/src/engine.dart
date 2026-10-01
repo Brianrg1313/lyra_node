@@ -25,6 +25,7 @@ import 'identity/devices.dart';
 import 'identity/passwords.dart';
 import 'identity/sessions.dart';
 import 'ids.dart';
+import 'net/discovery.dart';
 import 'net/events.dart';
 import 'net/files.dart';
 import 'net/tls.dart';
@@ -207,17 +208,19 @@ final class Engine {
   }
 
   /// The transport file for this start. Issued again when it is missing, names other addresses
-  /// than this computer has now, is past half its life, or names another master device.
-  Future<Transport> prepareTransport(Uint8List controlKey) async {
+  /// than this computer has now or another [host] (`label.local`, the one the file names when
+  /// null), is past half its life, or names another master device.
+  Future<Transport> prepareTransport(Uint8List controlKey, {String? host}) async {
     final addresses = await LocalAddresses.current();
     final master = devices.master?.certFingerprint;
     final existing = await Transport.read(paths.transport, controlKey);
+    final named = host ?? existing?.host;
     final Transport transport;
 
     if (existing == null ||
         existing.ca.fingerprint != authority.pinned.fingerprint ||
-        existing.needsRenewal(addresses, now: _now())) {
-      transport = Transport.issue(authority, addresses, masterDevice: master, now: _now());
+        existing.needsRenewal(addresses, host: named, now: _now())) {
+      transport = Transport.issue(authority, addresses, host: named, masterDevice: master, now: _now());
     } else if (existing.masterDevice != master) {
       transport = existing.withMaster(master);
     } else {
@@ -227,6 +230,21 @@ final class Engine {
     await transport.write(paths.transport, controlKey);
 
     return transport;
+  }
+
+  /// The label of this master's `.local` name (`LanName`): made from the company's name the
+  /// first time it is asked for once the company exists, then kept, so renaming the company
+  /// never moves the address people saved. None before the company exists.
+  String? get lanName {
+    const key = "lan.name";
+    final rows = store.db.select("SELECT value FROM meta WHERE key = ?", [key]);
+    if (rows.isNotEmpty) return rows.first["value"] as String;
+    if (!business.exists) return null;
+
+    final label = LanName.of(business.name);
+    store.write((db) => db.execute("INSERT INTO meta (key, value) VALUES (?, ?)", [key, label]));
+
+    return label;
   }
 
   String? get _owner {

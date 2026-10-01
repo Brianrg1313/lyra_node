@@ -365,12 +365,14 @@ Future<Object?> _startPairing(OpCall call) async {
 /// its computer's trust store or export for another one (plan §5.3). The pinned channel it comes
 /// on already verified it. Installed by hand on another computer, the person compares what the
 /// OS shows: Windows shows the SHA-1 `thumbprint`, other systems the SHA-256 `fingerprint`.
-/// `addresses` and `port` are where a browser then opens the web build.
+/// `host` (the master's `.local` name, none before its company exists), `addresses` and `port`
+/// are where a browser then opens the web build.
 Future<Object?> _browserCa(OpCall call) async {
   final root = call.engine.authority.browser;
   final server = call.connection.server;
 
   return {
+    "host": server.transport.host,
     "addresses": server.transport.addresses.where((address) => address != "127.0.0.1" && address != "::1").toList(),
     "port": server.port,
     "certificate": base64.encode(root.der),
@@ -422,7 +424,7 @@ bool _isOwner(OpCall call) => call.connection.grants.contains(Permissions.all);
 Future<Object?> _createBusiness(OpCall call) async {
   if (!_isOwner(call)) throw const EngineFailure(ErrorCodes.forbidden);
 
-  return call.write(() {
+  final answer = call.write(() {
     final engine = call.engine;
     if (engine.business.exists) throw const EngineFailure("company_exists");
 
@@ -430,6 +432,9 @@ Future<Object?> _createBusiness(OpCall call) async {
 
     return engine.business.summary();
   });
+  call.connection.server.onCompanyCreated?.call();
+
+  return answer;
 }
 
 Future<Object?> _profile(OpCall call) async => call.engine.business.profile(owner: _isOwner(call));
