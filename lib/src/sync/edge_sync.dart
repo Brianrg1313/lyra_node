@@ -857,7 +857,10 @@ final class _Caller {
     final answer = await _transport.send(await _signer.sign(method, "$base$path", body));
 
     if (answer.status >= 400 || answer.status < 200) {
-      throw EdgeFailure(answer.status, answer.body["code"] as String? ?? "http_${answer.status}", answer.body);
+      // The edge's own refusals carry a text `code`; anything else in front of it (a 404, a body
+      // the server could not read) answers in the API's shape, with the status as a number there.
+      final code = answer.body["code"];
+      throw EdgeFailure(answer.status, code is String ? code : "http_${answer.status}", answer.body);
     }
 
     _sync._heard(answer.body);

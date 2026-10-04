@@ -382,6 +382,14 @@ void main() {
       expect(engine.business.profile(owner: true)["caption"], isNot("From the future"));
     });
 
+    test("an error in the API's shape, not the edge's, is reported by its status", () async {
+      await enroll();
+      final report = await engine.edge.cycle(_Answering(EdgeResponse(404, {"code": 404, "message": "Not found"})));
+
+      expect(report.error, "http_404");
+      expect(engine.edge.status(), containsPair("revoked", false));
+    });
+
     test('a request whose body was changed on the way fails its signature', () async {
       final pair = await EdgeSigner.generate();
       final signer = await EdgeSigner.fromSeed("d-1", pair.seed);
@@ -395,4 +403,14 @@ void main() {
       expect(await EdgeSigner.verify(moved, publicKey), isFalse);
     });
   });
+}
+
+/// A backend that answers every call the same.
+final class _Answering implements EdgeTransport {
+  _Answering(this.answer);
+
+  final EdgeResponse answer;
+
+  @override
+  Future<EdgeResponse> send(EdgeRequest request) async => answer;
 }
