@@ -238,6 +238,15 @@ final class NodeRunner {
 
         final report = await current.edge.cycle(edgeTransport!);
         if (report.error != null) log.error("sync: ${report.error}");
+
+        // What a pull wrote outside any op: its events go out, and whoever's permissions the cloud
+        // changed checks them from their next frame, their lost sealed scopes unwrapped (P-8, P-12).
+        current.events.publish();
+        final lan = server;
+        for (final account in current.takePulledGrants()) {
+          if (lan != null && lan.engine == current) lan.regrant(account);
+          current.sealed.unshare(account);
+        }
       }
 
       void tick() {

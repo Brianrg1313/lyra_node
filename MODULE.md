@@ -59,6 +59,8 @@ one writer. Phase 2 built storage, keys, oplog, identities, audit and the proces
   `sync_fields` (each synced field's stamp), `sync_pulled`, `sync_rejected`, `sync_conflicts` (the inbox).
 - `lib/src/storage/migrations/m012_permissions.dart` — `members` (the cloud's per-person document), `permission_templates`,
   `permission_requests`, `meta.owner`; `grants` dropped, stored area ids on files and events made catalog keys.
+- `lib/src/storage/migrations/m013_cloud_members.dart` — `sync_members`: the cloud's document per person (the edge
+  `member`), by cloud account id, with the e-mail it is found by.
 - `lib/src/domain/permissions/permissions.dart` — `Permissions`: the cloud's `Members`, `Templates` and `Requests` (`get`,
   `templates` + create/edit/remove, `members`, `member`, `assign`, `revoke`, `requests`, `request`, `accountOf`):
   `session.md` session.permissions.
@@ -109,7 +111,8 @@ one writer. Phase 2 built storage, keys, oplog, identities, audit and the proces
 - `lib/src/identity/sessions.dart` — `Sessions` (access tokens in memory, rotated refresh tokens, reuse ends the session),
   `SessionTokens`, `SessionGrant`, `SessionScope`.
 - `lib/src/identity/grants.dart` — `Grants` (a person's `Grant` with the owner measured, `read`, `hasAccess`, `admit`,
-  `revoke`, `write` normalized, `makeOwner`), `MemberRow`, `TemplateRef`: `session.md` P-1, P-2, P-5.
+  `revoke`, `write` normalized, `makeOwner`; `cloudOwned`, `cloudIdOf`, `fromCloud`: P-12), `MemberRow`, `TemplateRef`:
+  `session.md` P-1, P-2, P-5, P-12.
 - `lib/src/net/x509.dart` — `X509` (the two roots of the installation CA, server and device certificates), `Certificate`.
 - `lib/src/net/tls.dart` — `LocalAddresses`, `Authority` (CA key and roots in `meta`, issues), `Transport`
   (`transport.json`, sealed with a control-key subkey: what TLS needs while locked, the `.local` `host` too;
@@ -138,7 +141,8 @@ one writer. Phase 2 built storage, keys, oplog, identities, audit and the proces
   `SyncReport`.
 - `lib/src/sync/entities.dart` — `EdgeEntity` (one entity of the edge vocabulary on the engine's tables: `read`,
   `touched` by an oplog entry, `apply` a pulled change) and its kinds: `CompanyEdge`, `SiteEdge`, `ProductTableEdge`,
-  `ProductFieldEdge`, `ProductEdge`, `StockMovementEdge`, `PaymentEdge`, `CurrencyEdge`, `AccountEdge`; `edgeOrigin`.
+  `ProductFieldEdge`, `ProductEdge`, `StockMovementEdge`, `PaymentEdge`, `CurrencyEdge`, `AccountEdge` (with the person's
+  permissions, upload only), `MemberEdge` (the cloud's permissions, pull only); `edgeOrigin`.
 - `lib/src/process/paths.dart` — `NodePaths` (data folder per OS and its files).
 - `lib/src/process/lock.dart` — `InstanceLock` (exclusive OS lock, one engine per folder).
 - `lib/src/process/control.dart` — `EngineStatusFile` (`engine.state.json`, HMAC-signed), `EnginePhase`, `ControlChannel`
@@ -180,6 +184,9 @@ one writer. Phase 2 built storage, keys, oplog, identities, audit and the proces
   field stamps, no echo, allowance), and the cloud app's edits.
 - `test/sync_test.dart` — the edge sync against `EdgeCloud`: enrolment, the first link both ways, live push and pull,
   facts, the same field on both sides and the inbox, deletes, retries, refusals, revocation, the allowance, the clock.
+- `test/sync_permissions_test.dart` — permissions on a master that syncs: the first upload carries them, the cloud's
+  `member` counts (by id map or e-mail, the owner kept, a delete takes access), kept for someone admitted later, the
+  master's editor refused (`permissions_online`) until revoked or past the allowance.
 - `test/process_test.dart` — the built executable with the real vault (Windows only, tag `process`).
 - `test/browser_e2e_test.dart` — the app's LAN web build in a headless Chrome over DevTools: pairs by code, key in
   IndexedDB, signs in, reloads (`device.prove`), revoked (tag `browser`, needs `LYRA_WEB`).
@@ -198,7 +205,10 @@ one writer. Phase 2 built storage, keys, oplog, identities, audit and the proces
 - Permissions are the cloud's (`session.md` session.permissions): every op declares one catalog key, as its cloud
   route does, and is checked against `Grants.of`; nothing grants by area id. The vocabulary is `lyra_protocol`'s copy
   of the backend's, never edited here first. A member's write calls `LanServer.regrant` and the sealed-key
-  `share`/`unshare` (`_applyGrant` in `ops.dart`).
+  `share`/`unshare` (`_applyGrant` in `ops.dart`); one the sync pulled, the runner after the cycle
+  (`Engine.takePulledGrants`).
+- While the master syncs (`Grants.cloudOwned`), permissions are the cloud's (P-12): every write to `members` or
+  `permission_templates` outside the sync refuses `permissions_online`, and an admission takes the cloud's document.
 - The engine never starts by itself (plan D4): nothing here installs a service, login item or scheduled task.
 - Lifecycle control (status, stop) is files in the data folder signed with the control key (vault); the signed state
   file is how the app knows the process is ours. Everything else, the master's own app included, goes through

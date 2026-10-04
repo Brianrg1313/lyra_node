@@ -185,7 +185,7 @@ void main() {
           "'{\"anyOf\":[\"sales.view\"],\"owner\":\"g\",\"overrides\":\"sales.view_all\"}')");
       });
 
-      expect(migrate(store, backups: paths.backups), [12]);
+      expect(migrate(store, backups: paths.backups, steps: migrations.where((m) => m.version <= 12).toList()), [12]);
 
       final db = store.db;
       expect(Grants.owner(db), "a");

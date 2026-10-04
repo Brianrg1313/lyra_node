@@ -28,13 +28,15 @@ final class Permissions {
 
   // ---------------------------------------------------------------- permissions.get
 
-  /// The catalog and the asker's own permissions (`GET /permissions`).
+  /// The catalog and the asker's own permissions (`GET /permissions`); `online` while they are
+  /// the cloud's to change (P-12).
   Map<String, Object?> get(String account) {
     final row = Grants.read(_db, account);
     final grant = Grants.of(_db, account);
 
     return {
       "catalog": PermissionCatalog.describe(),
+      "online": Grants.cloudOwned(_db),
       "mine": {
         "all": grant.all,
         "template": _ref(row?.template),
@@ -55,6 +57,7 @@ final class Permissions {
   /// `permissions.templates.create {name, description?, from?, permissions?}`: a company template,
   /// optionally starting from another one.
   Map<String, Object?> createTemplate(Map<String, Object?> args, {required String actor}) {
+    _local();
     final name = _name(args["name"]);
     final description = _description(args["description"]);
     final from = args["from"];
@@ -80,6 +83,7 @@ final class Permissions {
   /// `permissions.templates.edit {id, name?, description?, permissions?}`. The global ones are the
   /// platform's: a company copies one instead (`from`).
   Map<String, Object?> editTemplate(Map<String, Object?> args) {
+    _local();
     final row = _ownRow(args["id"]);
     final name = args.containsKey("name") ? _name(args["name"]) : row["name"] as String;
     final description = args.containsKey("description") ? _description(args["description"]) : row["description"];
@@ -98,6 +102,7 @@ final class Permissions {
   /// `permissions.templates.remove {id}`. Nobody's permissions change: those copied from it only
   /// lose the label.
   Map<String, Object?> removeTemplate(Object? id) {
+    _local();
     final row = _ownRow(id);
 
     _db.execute("DELETE FROM permission_templates WHERE id = ?", [row["id"]]);
@@ -128,7 +133,8 @@ final class Permissions {
   }
 
   /// One member with their whole structure: what the editor opens. Also someone with an active
-  /// job and no access yet (`access: false`), the state a new member starts from.
+  /// job and no access yet (`access: false`), the state a new member starts from. `online` while
+  /// only the cloud changes it (P-12).
   Map<String, Object?> member(Object? username, {required String viewer}) {
     final target = _target(username);
     final owner = Grants.owner(_db);
@@ -137,6 +143,7 @@ final class Permissions {
     return {
       ..._card(row, viewer, owner),
       "access": target.access,
+      "online": Grants.cloudOwned(_db),
       "sections": Grants.of(_db, target.account).all
         ? PermissionCatalog.filled(true)
         : PermissionCatalog.normalize(Grants.read(_db, target.account)?.sections),
@@ -152,6 +159,7 @@ final class Permissions {
     required Grant mine,
     String? device,
   }) {
+    _local();
     final target = _target(args["username"]);
     _guard(target.account, actor);
 
@@ -198,6 +206,7 @@ final class Permissions {
 
   /// `permissions.members.revoke {username}`: their access goes, their document stays.
   Map<String, Object?> revoke(Object? username, {required String actor, required Grant mine, String? device}) {
+    _local();
     final target = _target(username);
     if (!target.access) throw const EngineFailure("permission_member_not_found");
     _guard(target.account, actor);
@@ -294,6 +303,12 @@ final class Permissions {
     if (member == null && !job && !owner) throw const EngineFailure("permission_member_not_found");
 
     return (account: account, username: row["username"] as String, access: owner || (member?.access ?? false));
+  }
+
+  /// While the master syncs, permissions are changed in the cloud and arrive by the sync (P-12):
+  /// a change made here would be undone by the next one, and security isn't decided offline.
+  void _local() {
+    if (Grants.cloudOwned(_db)) throw const EngineFailure("permissions_online");
   }
 
   /// Nobody changes themselves, nobody changes the owner (P-6).

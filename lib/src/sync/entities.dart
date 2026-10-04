@@ -3,10 +3,12 @@ import 'dart:convert';
 import 'package:lyra_protocol/lyra_protocol.dart';
 import 'package:sqlite3/sqlite3.dart';
 
+import '../audit/audit_log.dart';
 import '../domain/business/business.dart';
 import '../domain/inventory/inventory.dart';
 import '../domain/stock/stock.dart';
 import '../failure.dart';
+import '../identity/grants.dart';
 import '../net/events.dart';
 import '../oplog/hlc.dart';
 import '../oplog/oplog.dart';
@@ -870,13 +872,28 @@ final class AccountEdge extends EdgeEntity {
     for (final row in db.select("SELECT id FROM accounts WHERE status = 'active' AND email IS NOT NULL AND deleted = 0")) row["id"] as String,
   ];
 
+  /// With the person's permissions here (`permissions`): the cloud admits a new account with
+  /// them (§10); from then on the cloud's are the ones that count (`member`).
   @override
   EdgeRow? read(Database db, String id) {
     final row = db.select("SELECT email, first_name, last_name, updated_hlc FROM accounts WHERE id = ?", [id]).firstOrNull;
     if (row == null) return null;
 
+    final member = Grants.read(db, id);
+    final all = id == Grants.owner(db) || (member?.all ?? false);
+
     return EdgeRow(
-      fields: {"email": row["email"], "firstName": row["first_name"], "lastName": row["last_name"]},
+      fields: {
+        "email": row["email"],
+        "firstName": row["first_name"],
+        "lastName": row["last_name"],
+        "permissions": {
+          "access": id == Grants.owner(db) || (member?.access ?? false),
+          "all": all,
+          "sections": all ? const <String, Object?>{} : PermissionCatalog.normalize(member?.sections),
+          "template": member?.template == null ? null : {"scope": member!.template!.scope, "id": member.template!.id},
+        },
+      },
       hlc: Hlc.parse(row["updated_hlc"] as String),
     );
   }
@@ -889,4 +906,125 @@ final class AccountEdge extends EdgeEntity {
 
   @override
   String apply(Database db, EdgeWrite write) => write.id;
+}
+
+/// A person's permissions as the cloud holds them (`session.md` P-12): pulled, never pushed. Who
+/// may do what is the cloud's word while the master syncs (plan §9.3), so nothing written here
+/// goes up, and the master refuses to change permissions meanwhile (`permissions_online`).
+///
+/// Its id is the cloud account's, the same as the `account` entity's, so it is natural: the
+/// document is kept under that id (`sync_members`) and laid onto the local account it names,
+/// found through the accounts' id map or by e-mail. One whose person has no account here yet waits
+/// there for when they are admitted (`Grants.admit`).
+final class MemberEdge extends EdgeEntity {
+  const MemberEdge(this.now, this.changed);
+
+  final DateTime Function() now;
+
+  /// Told every account whose permissions a pull wrote, so its open sessions take them (P-8).
+  final void Function(String account) changed;
+
+  @override
+  String get name => "member";
+
+  @override
+  String get local => "member";
+
+  @override
+  bool get natural => true;
+
+  /// Never uploaded: the people go up as `account`, with their permissions.
+  @override
+  List<String> ids(Database db) => const [];
+
+  @override
+  EdgeRow? read(Database db, String id) {
+    final row = db.select("SELECT * FROM sync_members WHERE cloud_id = ?", [id]).firstOrNull;
+    if (row == null) return null;
+
+    final sections = row["sections"] as String?;
+    final template = row["template"] as String?;
+
+    return EdgeRow(
+      fields: {
+        "email": row["email"],
+        "access": row["access"] == 1,
+        "all": row["all_granted"] == 1,
+        "sections": sections == null ? null : jsonDecode(sections),
+        "template": template == null ? null : jsonDecode(template),
+        "custom": row["custom"] == 1,
+      },
+      hlc: Hlc.parse(row["updated_hlc"] as String),
+    );
+  }
+
+  @override
+  List<EdgeTouch> touched(Database db, OplogEntry entry) => const [];
+
+  @override
+  String apply(Database db, EdgeWrite write) {
+    if (write.op != EdgeOps.upsert && write.op != EdgeOps.delete) throw const EngineFailure("invalid");
+
+    final document = {
+      "email": null, "access": false, "all": false, "sections": null, "template": null, "custom": false,
+      ...?read(db, write.id)?.fields,
+      ...write.fields,
+      // The cloud took the person out of the company: no access, the document kept (P-5).
+      if (write.op == EdgeOps.delete) "access": false,
+    };
+
+    final email = document["email"];
+    if (email != null && email is! String) EdgeEntity.invalid("email");
+    for (final flag in const ["access", "all", "custom"]) {
+      if (document[flag] is! bool) EdgeEntity.invalid(flag);
+    }
+    final sections = document["sections"];
+    if (sections != null && sections is! Map) EdgeEntity.invalid("sections");
+    final template = document["template"];
+    if (template != null &&
+        (template is! Map || !const {"global", "company"}.contains(template["scope"]) || template["id"] is! String)) {
+      EdgeEntity.invalid("template");
+    }
+
+    db.execute(
+      "INSERT INTO sync_members (cloud_id, email, access, all_granted, sections, template, custom, updated_hlc) "
+      "VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8) ON CONFLICT (cloud_id) DO UPDATE SET email = ?2, access = ?3, "
+      "all_granted = ?4, sections = ?5, template = ?6, custom = ?7, updated_hlc = ?8",
+      [
+        write.id,
+        email,
+        document["access"] == true ? 1 : 0,
+        document["all"] == true ? 1 : 0,
+        // A key a newer catalog has and this engine doesn't is dropped, not refused: the cloud's
+        // word stands for what this engine knows.
+        sections == null ? null : jsonEncode(PermissionCatalog.normalize(sections)),
+        template == null ? null : jsonEncode({"scope": (template as Map)["scope"], "id": template["id"]}),
+        document["custom"] == true ? 1 : 0,
+        write.stamp.pack(),
+      ],
+    );
+    log(db, write, write.created ? "created" : "edited", write.fields);
+
+    final account = _account(db, write.id, email as String?);
+    if (account != null) {
+      Grants.fromCloud(db, account, now: now());
+      EventLog.append(db, Events.permissionsChanged, {"accountId": account}, at: now(), accounts: [account]);
+      AuditLog(db, now: now).append(
+        document["access"] == true ? AuditKinds.permissionsAssigned : AuditKinds.permissionsRevoked,
+        actor: null,
+        device: edgeOrigin,
+        data: {"account": account, "all": document["all"], "template": document["template"], "from": "cloud", "by": write.actor},
+      );
+      changed(account);
+    }
+
+    return write.id;
+  }
+
+  static String? _account(Database db, String cloudId, String? email) =>
+    db.select("SELECT local_id FROM sync_ids WHERE entity = 'account' AND cloud_id = ?", [cloudId]).firstOrNull?["local_id"]
+      as String? ??
+    (email == null
+      ? null
+      : db.select("SELECT id FROM accounts WHERE lower(email) = lower(?) AND deleted = 0", [email]).firstOrNull?["id"] as String?);
 }

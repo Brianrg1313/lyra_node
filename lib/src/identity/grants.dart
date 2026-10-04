@@ -76,11 +76,66 @@ abstract final class Grants {
   }
 
   /// Lets [account] in with no document if it has none, or back in with the one it kept (P-5).
-  static void admit(Database db, String account, {required DateTime now}) => db.execute(
-    "INSERT INTO members (account, access, updated) VALUES (?, 1, ?) "
-    "ON CONFLICT (account) DO UPDATE SET access = 1, updated = excluded.updated",
-    [account, now.toUtc().toIso8601String()],
-  );
+  /// While the cloud owns the permissions (P-12), the cloud's document for that person instead,
+  /// when it has one.
+  static void admit(Database db, String account, {required DateTime now}) {
+    if (cloudOwned(db) && fromCloud(db, account, now: now)) return;
+
+    db.execute(
+      "INSERT INTO members (account, access, updated) VALUES (?, 1, ?) "
+      "ON CONFLICT (account) DO UPDATE SET access = 1, updated = excluded.updated",
+      [account, now.toUtc().toIso8601String()],
+    );
+  }
+
+  /// Whether who may do what is the cloud's word here (`session.md` P-12): the master is enrolled
+  /// and syncing. Revoked, or paused past the allowance, the cloud's changes don't arrive, so the
+  /// master's own editor is the way again.
+  static bool cloudOwned(Database db) => db.select(
+    "SELECT 1 FROM sync_link WHERE revoked = 0 AND allowance != 'exceeded'",
+  ).isNotEmpty;
+
+  /// The cloud account [account] is, by the accounts' id map or else by e-mail; null when the
+  /// cloud has no document for it.
+  static String? cloudIdOf(Database db, String account) {
+    final mapped = db.select(
+      "SELECT s.cloud_id FROM sync_ids i JOIN sync_members s ON s.cloud_id = i.cloud_id "
+      "WHERE i.entity = 'account' AND i.local_id = ?",
+      [account],
+    ).firstOrNull;
+    if (mapped != null) return mapped["cloud_id"] as String;
+
+    return db.select(
+      "SELECT s.cloud_id FROM sync_members s JOIN accounts a ON lower(a.email) = lower(s.email) "
+      "WHERE a.id = ? AND a.email IS NOT NULL ORDER BY s.cloud_id LIMIT 1",
+      [account],
+    ).firstOrNull?["cloud_id"] as String?;
+  }
+
+  /// Lays the cloud's document for [account] (`sync_members`, pulled by the edge sync) onto its
+  /// row, access included. Answers whether the cloud had one. The owner's row is written like
+  /// anyone's and changes nothing: [of] answers `all` for the owner whatever is stored.
+  static bool fromCloud(Database db, String account, {required DateTime now}) {
+    final id = cloudIdOf(db, account);
+    if (id == null) return false;
+
+    final row = db.select("SELECT * FROM sync_members WHERE cloud_id = ?", [id]).first;
+    final template = row["template"] == null ? null : jsonDecode(row["template"] as String) as Map<String, Object?>;
+    final sections = row["sections"] as String?;
+
+    write(
+      db,
+      account,
+      all: row["all_granted"] == 1,
+      sections: sections == null ? null : PermissionCatalog.normalize(jsonDecode(sections)),
+      template: template == null ? null : (scope: template["scope"] as String, id: template["id"] as String),
+      custom: row["custom"] == 1,
+      now: now,
+    );
+    if (row["access"] != 1) revoke(db, account, now: now);
+
+    return true;
+  }
 
   /// Takes [account]'s access away; the document stays, so letting them back in starts from it.
   static void revoke(Database db, String account, {required DateTime now, String? by}) => db.execute(

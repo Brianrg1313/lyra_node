@@ -97,6 +97,7 @@ abstract final class Messages {
     "permission_member_not_found": "Nobody with that username has access to, or a job at, this company.",
     "permissions_self": "You can't change your own permissions.",
     "permissions_owner": "The owner always has every permission.",
+    "permissions_online": "This company's permissions are changed online, and reach this server by itself.",
     "escalation": "You can only give or take away permissions you have yourself.",
     "permissions_invalid": "That permission doesn't exist.",
     "permission_template_not_found": "That template doesn't exist.",

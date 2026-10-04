@@ -179,9 +179,20 @@ final class Engine {
     now: _now,
     entities: [
       CompanyEdge(_now), SiteEdge(_now), ProductTableEdge(_now), ProductFieldEdge(_now), ProductEdge(_now),
-      const CurrencyEdge(), StockMovementEdge(stock), const PaymentEdge(), const AccountEdge(),
+      const CurrencyEdge(), StockMovementEdge(stock), const PaymentEdge(), const AccountEdge(), MemberEdge(_now, _pulledGrants.add),
     ],
   );
+
+  final _pulledGrants = <String>{};
+
+  /// The accounts whose permissions the sync wrote since the last call (P-12): the runner applies
+  /// them to their open sessions, as an op's write does (P-8).
+  List<String> takePulledGrants() {
+    final accounts = _pulledGrants.toList();
+    _pulledGrants.clear();
+
+    return accounts;
+  }
 
   /// The keys of the sealed fields each session opened (plan §6.3): one instance for the engine's
   /// life, like [sessions].
