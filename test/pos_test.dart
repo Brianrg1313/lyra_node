@@ -68,13 +68,6 @@ void main() {
   Future<Map> line(String id, Map<String, Object?> args, {RpcClient? as}) async =>
     ((await write(Ops.posInvoicesLine, {"id": id, ...args}, as: as) as Map)["invoice"] as Map);
 
-  void grant(String account, List<String> permissions) => master.openEngine.store.write((db) {
-    db.execute("DELETE FROM grants WHERE account = ?", [account]);
-    for (final permission in permissions) {
-      db.execute("INSERT INTO grants (account, permission) VALUES (?, ?)", [account, permission]);
-    }
-  });
-
   setUp(() async {
     master = await TestMaster.start();
     (client, tokens) = await master.signIn();
@@ -233,7 +226,7 @@ void main() {
       ]);
     });
 
-    test('refusals: no price, too many units, a typed charge or a new rate without their permission (POS-2, POS-14, POS-16, POS-17)', () async {
+    test('refusals: no price, too many units; a typed charge and a new rate are pos.sell, like any line (POS-2, POS-14, POS-16, POS-17)', () async {
       final free = await record({"name": "Sin precio"});
       final cafe = await record({"name": "Café", "price": "1"});
       await restock(cafe, 1);
@@ -243,13 +236,16 @@ void main() {
       await expectRefusal(line(invoice["id"], {"productId": cafe, "quantity": 10000}), "too_many_units");
       await expectRefusal(line(invoice["id"], {"productId": cafe, "add": 1, "quantity": 2}), ErrorCodes.badRequest);
 
-      grant(tokens["accountId"] as String, ["pos.view", "pos.sell"]);
+      grantKeys(master.openEngine, tokens["accountId"] as String, ["pos", "pos.sell"]);
       final (cashier, _) = await master.signIn();
 
-      await expectRefusal(line(invoice["id"], {"concept": "Propina", "price": 100, "add": 1}, as: cashier), ErrorCodes.forbidden);
-      await expectRefusal(line(invoice["id"], {"productId": cafe, "add": 1, "tax": 8}, as: cashier), ErrorCodes.forbidden);
-      final ticket = await line(invoice["id"], {"productId": cafe, "add": 1, "tax": 16}, as: cashier);
-      expect(((ticket["items"] as List).single as Map)["taxRate"], "16");
+      await line(invoice["id"], {"concept": "Propina", "price": 100, "add": 1}, as: cashier);
+      final ticket = await line(invoice["id"], {"productId": cafe, "add": 1, "tax": 8}, as: cashier);
+      expect(((ticket["items"] as List).last as Map)["taxRate"], "8");
+
+      grantKeys(master.openEngine, tokens["accountId"] as String, ["pos"]);
+      final (watcher, _) = await master.signIn();
+      await expectRefusal(line(invoice["id"], {"productId": cafe, "add": 1}, as: watcher), ErrorCodes.forbidden);
     });
 
     test('closing consumes the holds as one sale each; the ticket is sealed (POS-30, POS-32, POS-18, ST-23)', () async {
@@ -341,8 +337,8 @@ void main() {
       await restock(cafe, 4);
 
       final till = await master.pairNative("Till", code: (await master.openPairing())["code"] as String);
-      // The owner's session already bound keeps its grants; the till's new one has only the POS's.
-      grant(tokens["accountId"] as String, ["pos.view", "pos.sell", "pos.checkout"]);
+      // The owner's session already bound keeps its permissions; the till's new one has only the POS's.
+      grantKeys(master.openEngine, tokens["accountId"] as String, ["pos", "pos.sell"]);
       final (cashier, _) = await master.signIn(till);
 
       final events = <RpcEvent>[];

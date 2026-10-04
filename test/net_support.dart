@@ -9,6 +9,8 @@ import 'package:test/test.dart';
 
 import 'support.dart';
 
+export 'support.dart' show grantKeys;
+
 const app = "0.0.7";
 
 PairingDevice deviceNamed(String name, {String platform = "windows"}) =>

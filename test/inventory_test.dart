@@ -134,10 +134,7 @@ void main() {
       final name = await field(id, "Name", "TITLE");
       final owner = tokens["accountId"] as String;
 
-      master.openEngine.store.write((db) {
-        db.execute("DELETE FROM grants WHERE account = ?", [owner]);
-        db.execute("INSERT INTO grants (account, permission) VALUES (?, 'inventory.view')", [owner]);
-      });
+      grantKeys(master.openEngine, owner, ["products"]);
       final (reader, _) = await master.signIn();
 
       final dragged = await reader.call(Ops.inventoryFieldsEdit,

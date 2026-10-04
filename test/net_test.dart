@@ -539,7 +539,7 @@ void main() {
 
       emit("b");
       emit("not-yours", accounts: ["someone-else"]);
-      emit("c", accounts: [ownerId], permission: "local_server.devices");
+      emit("c", accounts: [ownerId], permission: "server.devices");
 
       await Future<void>.delayed(const Duration(milliseconds: 200));
       expect(received, ["a", "b", "c"]);

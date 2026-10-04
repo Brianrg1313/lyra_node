@@ -31,7 +31,7 @@ export 'src/failure.dart';
 export 'src/identity/accounts.dart';
 export 'src/identity/devices.dart';
 export 'src/identity/passwords.dart';
-export 'src/identity/permissions.dart';
+export 'src/identity/grants.dart';
 export 'src/identity/sessions.dart';
 export 'src/ids.dart';
 export 'src/net/discovery.dart';

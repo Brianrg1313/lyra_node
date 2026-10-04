@@ -6,13 +6,12 @@ import 'package:lyra_protocol/lyra_protocol.dart';
 import '../engine.dart';
 import '../failure.dart';
 import '../identity/devices.dart';
-import '../identity/permissions.dart';
+import '../identity/grants.dart';
 import '../audit/audit_log.dart';
 import '../crypto/sealed.dart';
 import '../domain/business/business.dart';
 import '../domain/inventory/inventory.dart';
 import '../domain/inventory/spreadsheet.dart';
-import '../domain/money/finance.dart';
 import '../domain/sales/sales.dart';
 import 'files.dart';
 import 'rpc.dart';
@@ -46,65 +45,64 @@ final Map<String, OpRule> opRules = {
   // The owner's alone, which the handler checks: no grant names it (B-1).
   Ops.businessCreate.name: const OpRule(_createBusiness),
   Ops.businessProfile.name: const OpRule(_profile, permission: _businessView),
-  Ops.businessEdit.name: const OpRule(_editProfile, permission: "business.settings.edit"),
-  Ops.businessSetLogo.name: const OpRule(_setLogo, permission: "business.settings.edit_logo"),
+  Ops.businessEdit.name: const OpRule(_editProfile, permission: _businessEdit),
+  Ops.businessSetLogo.name: const OpRule(_setLogo, permission: _businessEdit),
   Ops.businessLink.name: const OpRule(_link),
   Ops.businessSiteGet.name: const OpRule(_site, permission: _businessView),
-  Ops.businessSiteEdit.name: const OpRule(_editSite, permission: "business.settings.edit"),
+  Ops.businessSiteEdit.name: const OpRule(_editSite, permission: _businessEdit),
   Ops.inventoryTablesList.name: const OpRule(_tables, permission: _inventoryView),
-  Ops.inventoryTablesCreate.name: const OpRule(_createTable, permission: "inventory.create_table"),
-  Ops.inventoryTablesEdit.name: const OpRule(_editTable, permission: "inventory.edit_table"),
-  Ops.inventoryTablesDelete.name: const OpRule(_deleteTable, permission: "inventory.delete_table"),
+  Ops.inventoryTablesCreate.name: const OpRule(_createTable, permission: _productsStructure),
+  Ops.inventoryTablesEdit.name: const OpRule(_editTable, permission: _productsStructure),
+  Ops.inventoryTablesDelete.name: const OpRule(_deleteTable, permission: _productsStructure),
   Ops.inventoryTablesStructure.name: const OpRule(_structure, permission: _inventoryView),
   Ops.inventoryTablesDetails.name: const OpRule(_details, permission: _inventoryView),
-  Ops.inventoryFieldsCreate.name: const OpRule(_createField, permission: _editColumns),
+  Ops.inventoryFieldsCreate.name: const OpRule(_createField, permission: _productsStructure),
   // A column's width alone is anyone's who opens the table (I-17); the handler asks for more.
   Ops.inventoryFieldsEdit.name: const OpRule(_editField, permission: _inventoryView),
-  Ops.inventoryFieldsDelete.name: const OpRule(_deleteField, permission: _editColumns),
+  Ops.inventoryFieldsDelete.name: const OpRule(_deleteField, permission: _productsStructure),
   Ops.inventoryRecordsList.name: const OpRule(_records, permission: _inventoryView),
-  Ops.inventoryRecordsCreate.name: const OpRule(_createRecord, permission: _editRecords),
-  Ops.inventoryRecordsEdit.name: const OpRule(_editRecord, permission: _editRecords),
-  Ops.inventoryRecordsDelete.name: const OpRule(_deleteRecord, permission: _editRecords),
-  Ops.inventoryImagesAdd.name: const OpRule(_addImage, permission: _editRecords),
-  Ops.inventoryImagesRemove.name: const OpRule(_removeImage, permission: _editRecords),
-  Ops.inventoryImportStructure.name: const OpRule(_importStructure, permission: "inventory.import"),
-  Ops.inventoryImportRecords.name: const OpRule(_importRecords, permission: "inventory.import"),
-  Ops.inventoryTablesNormalize.name: const OpRule(_normalize, permission: _editColumns),
-  Ops.stockMove.name: const OpRule(_move, permission: "inventory.move_stock"),
-  Ops.stockHistory.name: const OpRule(_history, permission: _inventoryView),
-  Ops.stockSummary.name: const OpRule(_summary, permission: _inventoryView),
+  Ops.inventoryRecordsCreate.name: const OpRule(_createRecord, permission: "products.create"),
+  Ops.inventoryRecordsEdit.name: const OpRule(_editRecord, permission: "products.edit"),
+  Ops.inventoryRecordsDelete.name: const OpRule(_deleteRecord, permission: "products.delete"),
+  Ops.inventoryImagesAdd.name: const OpRule(_addImage, permission: "inventory.pictures"),
+  Ops.inventoryImagesRemove.name: const OpRule(_removeImage, permission: "inventory.pictures"),
+  Ops.inventoryImportStructure.name: const OpRule(_importStructure, permission: _productsStructure),
+  Ops.inventoryImportRecords.name: const OpRule(_importRecords, permission: "products.import"),
+  Ops.inventoryTablesNormalize.name: const OpRule(_normalize, permission: _productsStructure),
+  // Each operation takes its own key, as the cloud's add, remove, return and reserve do: the handler asks.
+  Ops.stockMove.name: const OpRule(_move, permission: _stockView),
+  Ops.stockHistory.name: const OpRule(_history, permission: _stockView),
+  Ops.stockSummary.name: const OpRule(_summary, permission: _stockView),
   Ops.posSummary.name: const OpRule(_posSummary, permission: _posView),
   Ops.posCatalog.name: const OpRule(_posCatalog, permission: _posView),
   Ops.posMethods.name: const OpRule(_posMethods, permission: _posView),
-  // A typed-in charge and a changed rate need more (`pos.md`, ops): the handler asks.
-  Ops.posInvoicesOpen.name: const OpRule(_openInvoice, permission: "pos.sell"),
-  Ops.posInvoicesLine.name: const OpRule(_writeLine, permission: "pos.sell"),
-  Ops.posInvoicesClose.name: const OpRule(_closeInvoice, permission: "pos.checkout"),
-  Ops.posInvoicesCancel.name: const OpRule(_cancelInvoice, permission: "pos.cancel_ticket"),
+  Ops.posInvoicesOpen.name: const OpRule(_openInvoice, permission: _sell),
+  Ops.posInvoicesLine.name: const OpRule(_writeLine, permission: _sell),
+  Ops.posInvoicesClose.name: const OpRule(_closeInvoice, permission: _sell),
+  Ops.posInvoicesCancel.name: const OpRule(_cancelInvoice, permission: "pos.cancel"),
   Ops.posInvoicesList.name: const OpRule(_openInvoices, permission: _posView),
   Ops.salesList.name: const OpRule(_sales, permission: _salesView),
   Ops.salesCatalog.name: const OpRule(_salesCatalog, permission: _salesView),
   Ops.salesDetail.name: const OpRule(_saleDetail, permission: _salesView),
-  Ops.salesFulfil.name: const OpRule(_fulfil, permission: "sales.fulfil"),
-  Ops.moneyCatalog.name: const OpRule(_moneyCatalog, permission: "finance.view"),
-  Ops.moneySummary.name: const OpRule(_moneySummary, permission: "finance.overview.view"),
-  // `finance.payments.record`, or `finance.receivables.collect` for a concept that settles (M-7).
-  Ops.moneyPaymentsRecord.name: const OpRule(_recordPayment),
-  Ops.moneyPaymentsVoid.name: const OpRule(_voidPayment, permission: "finance.payments.void"),
-  Ops.moneyPaymentsSearch.name: const OpRule(_payments, permission: "finance.payments.view"),
-  Ops.moneyReceivables.name: const OpRule(_receivables, permission: "finance.receivables.view"),
-  Ops.moneyMethodsList.name: const OpRule(_methods, permission: _methodsView),
-  Ops.moneyMethodsRails.name: const OpRule(_rails, permission: _methodsView),
-  Ops.moneyMethodsCreate.name:
-    const OpRule(_createMethod, permission: "finance.methods.create", sealedArgs: _sealedMethodArgs),
-  Ops.moneyMethodsEdit.name: const OpRule(_editMethod, permission: "finance.methods.edit", sealedArgs: _sealedMethodArgs),
-  Ops.moneyMethodsRemove.name: const OpRule(_removeMethod, permission: "finance.methods.delete"),
-  Ops.moneyCurrenciesGet.name: const OpRule(_currencies, permission: _methodsView),
-  Ops.moneyCurrenciesSave.name: const OpRule(_saveCurrency, permission: _manageCurrencies),
-  Ops.moneyCurrenciesRemove.name: const OpRule(_removeCurrency, permission: _manageCurrencies),
-  Ops.exportAccounting.name: const OpRule(_exportAccounting, permission: "finance.export"),
-  // Without `business.employees.view` a person still reads their own card and detail (E-1, E-3):
-  // the handlers shape the answer.
+  Ops.salesFulfil.name: const OpRule(_fulfil, permission: "sales.fulfill"),
+  Ops.moneyCatalog.name: const OpRule(_moneyCatalog, permission: _money),
+  Ops.moneySummary.name: const OpRule(_moneySummary, permission: _money),
+  // A payment and a receivable's collection are both the cloud's `money.charge` (M-7).
+  Ops.moneyPaymentsRecord.name: const OpRule(_recordPayment, permission: "money.charge"),
+  Ops.moneyPaymentsVoid.name: const OpRule(_voidPayment, permission: "money.void"),
+  Ops.moneyPaymentsSearch.name: const OpRule(_payments, permission: _money),
+  Ops.moneyReceivables.name: const OpRule(_receivables, permission: _money),
+  Ops.moneyMethodsList.name: const OpRule(_methods, permission: _money),
+  Ops.moneyMethodsRails.name: const OpRule(_rails, permission: _money),
+  Ops.moneyMethodsCreate.name: const OpRule(_createMethod, permission: _accounts, sealedArgs: _sealedMethodArgs),
+  Ops.moneyMethodsEdit.name: const OpRule(_editMethod, permission: _accounts, sealedArgs: _sealedMethodArgs),
+  Ops.moneyMethodsRemove.name: const OpRule(_removeMethod, permission: _accounts),
+  Ops.moneyCurrenciesGet.name: const OpRule(_currencies, permission: _money),
+  Ops.moneyCurrenciesSave.name: const OpRule(_saveCurrency, permission: _accounts),
+  Ops.moneyCurrenciesRemove.name: const OpRule(_removeCurrency, permission: _accounts),
+  Ops.exportAccounting.name: const OpRule(_exportAccounting, permission: "money.export"),
+  // Without `employees` a person still reads their own card and detail (E-1, E-3): the handlers
+  // shape the answer.
   Ops.employeesList.name: const OpRule(_employees),
   Ops.employeesFormer.name: const OpRule(_formerEmployees, permission: _employeesView),
   Ops.employeesDetail.name: const OpRule(_employee),
@@ -114,25 +112,45 @@ final Map<String, OpRule> opRules = {
   Ops.employeesEdit.name: const OpRule(_editEmployee, permission: _manageEmployees, sealedArgs: EmployeeFields.sealed),
   Ops.employeesAccept.name: const OpRule(_acceptEmployment),
   Ops.profileEdit.name: const OpRule(_editOwnProfile, sealedArgs: EmployeeFields.sealed),
+  Ops.permissionsGet.name: const OpRule(_permissions),
+  Ops.permissionsTemplatesList.name: const OpRule(_templates, permission: _permissionsView),
+  Ops.permissionsTemplatesCreate.name: const OpRule(_createTemplate, permission: _templatesEdit),
+  Ops.permissionsTemplatesEdit.name: const OpRule(_editTemplate, permission: _templatesEdit),
+  Ops.permissionsTemplatesRemove.name: const OpRule(_removeTemplate, permission: _templatesEdit),
+  Ops.permissionsMembersList.name: const OpRule(_members, permission: _permissionsView),
+  Ops.permissionsMembersDetail.name: const OpRule(_member, permission: _permissionsView),
+  Ops.permissionsMembersAssign.name: const OpRule(_assign, permission: _assignKey),
+  Ops.permissionsMembersRevoke.name: const OpRule(_revoke, permission: _assignKey),
+  Ops.permissionsRequestsList.name: const OpRule(_requests),
+  Ops.permissionsRequestsCreate.name: const OpRule(_request),
 };
 
-const _businessView = "business.view";
-const _inventoryView = "inventory.view";
-const _editColumns = "inventory.edit_columns";
-const _editRecords = "inventory.edit_records";
-const _posView = "pos.view";
-const _salesView = "sales.view";
-const _manageCurrencies = "finance.methods.manage_currencies";
-const _methodsView = "finance.methods.view";
-const _employeesView = "business.employees.view";
-const _viewPersonal = "business.employees.view_personal";
+// The catalog's keys (`session.md` P-4): each op takes the one its cloud route takes.
+const _businessView = "business";
+const _businessEdit = "business.edit";
+const _inventoryView = "products";
+const _productsStructure = "products.structure";
+const _stockView = "inventory";
+const _posView = "pos";
+const _sell = "pos.sell";
+const _salesView = "sales";
+const _money = "money";
+const _accounts = "money.accounts";
+const _employeesView = "employees";
+const _manageEmployees = "employees.manage";
+const _permissionsView = "permissions";
+const _templatesEdit = "permissions.templates";
+const _assignKey = "permissions.assign";
 
-/// The app's tree has no `edit` action under employees: `invite` is the one that maps to the
-/// cloud's `employees.manage`, which both inviting and editing a job need (`employees.md` E-12).
-const _manageEmployees = "business.employees.invite";
+/// The cloud has no employee permission for personal data: whoever reads the staff reads it
+/// (`session.md` P-9).
+const _viewPersonal = _employeesView;
 
-/// `docs/app-areas.json`, area `local_server`.
-const _devicesPermission = "local_server.devices";
+/// The master's own section (`session.md` P-4), area `local_server`.
+const _devicesPermission = "server.devices";
+
+/// Whether the session's person can [key] (`session.md` P-1).
+bool _allows(OpCall call, String key) => call.connection.grant.can(key);
 
 /// `hello` (`protocol-v1.md` §4). A browser gets a challenge to sign (`device.prove`).
 Future<Object?> _hello(OpCall call) async {
@@ -211,7 +229,7 @@ Future<Object?> _bind(OpCall call) async {
   final account = call.engine.accounts.byId(grant.accountId);
   if (account == null) throw const EngineFailure(ErrorCodes.sessionRevoked);
 
-  call.connection.bind(token, grant, account.grants);
+  call.connection.bind(token, grant, account.grant);
   call.engine.devices.touch(call.device.id, account: account.id);
 
   return {"accountId": account.id, "expires": grant.expires.toIso8601String()};
@@ -291,7 +309,7 @@ Future<Object?> _refresh(OpCall call) async {
   // The session's sealed keys move to the new token (and come back after a restart).
   await engine.sealed.refreshed(
     tokens.sessionId,
-    grants: account?.grants ?? const {},
+    grant: account?.grant ?? Grant.none(),
     previous: previous,
     next: tokens.refreshToken,
   );
@@ -384,17 +402,19 @@ Future<Object?> _browserCa(OpCall call) async {
 
 /// `session.bootstrap` (`session.md`): what `/init` answers in the cloud, for this master's one
 /// company (S-30), with the bundled catalogues (S-32). A master set up without its company answers
-/// none and the cloud's `business.none` task (S-31): the app's welcome creates it.
+/// none and the cloud's `business.none` task (S-31): the app's welcome creates it. Someone without
+/// access to it is answered none too (P-5).
 Future<Object?> _bootstrap(OpCall call) async {
   final engine = call.engine;
   final business = engine.business;
-  final exists = business.exists;
+  final member = business.exists && Grants.hasAccess(engine.store.db, call.session.accountId);
 
   return {
     "client": engine.accounts.card(call.session.accountId),
-    "businesses": [if (exists) business.summary()],
-    "permissions": {if (exists) business.id: [...call.connection.grants]..sort()},
-    "tasks": [if (!exists) {"key": "business.none"}],
+    "businesses": [if (member) business.summary()],
+    "permissions": {if (member) business.id: call.connection.grant.tree},
+    "owned": [if (member && _isOwner(call)) business.id],
+    "tasks": [if (!business.exists) {"key": "business.none"}],
     "catalogs": {
       "version": Catalogs.version,
       Catalogs.countries: Catalogs.countryRows,
@@ -404,7 +424,7 @@ Future<Object?> _bootstrap(OpCall call) async {
       "mode": "local",
       "instanceId": engine.instanceId,
       "engine": engineVersion,
-      "timezone": exists ? business.timezone : null,
+      "timezone": member ? business.timezone : null,
     },
   };
 }
@@ -418,7 +438,7 @@ Future<Object?> _catalog(OpCall call) async {
   return {"version": Catalogs.version, "items": rows};
 }
 
-bool _isOwner(OpCall call) => call.connection.grants.contains(Permissions.all);
+bool _isOwner(OpCall call) => Grants.owner(call.engine.store.db) == call.session.accountId;
 
 /// `business.create {name, country, currency, language, activity?}` (B-1): the owner creates the
 /// company of a master set up without one, once.
@@ -496,10 +516,10 @@ Future<Object?> _details(OpCall call) async => call.engine.inventory.details(cal
 Future<Object?> _createField(OpCall call) async => call.write(() =>
   call.engine.inventory.createField(call.args, actor: call.session.accountId, device: call.device.id));
 
-/// `inventory.fields.edit`: anything past the width needs `inventory.edit_columns` (I-17).
+/// `inventory.fields.edit`: anything past the width needs `products.structure` (I-17).
 Future<Object?> _editField(OpCall call) async {
   final inventory = call.engine.inventory;
-  if (!inventory.onlyWidth(call.args) && !Permissions.allows(call.connection.grants, _editColumns)) {
+  if (!inventory.onlyWidth(call.args) && !_allows(call, _productsStructure)) {
     throw const EngineFailure(ErrorCodes.forbidden);
   }
 
@@ -634,8 +654,13 @@ int _int(OpCall call, String name, int fallback) {
 // ---------------------------------------------------------------- stock (`stock.md`)
 
 /// `stock.move {operation, tableId, productId, quantity, reason?, note?}` (ST-10 to ST-16).
-Future<Object?> _move(OpCall call) async => call.write(() => call.engine.stock.move(
-  operation: call.text("operation", max: 16),
+Future<Object?> _move(OpCall call) async {
+  final operation = call.text("operation", max: 16);
+  final key = _stockKeys[operation];
+  if (key != null && !_allows(call, key)) throw const EngineFailure(ErrorCodes.forbidden);
+
+  return call.write(() => call.engine.stock.move(
+  operation: operation,
   tableId: call.text("tableId"),
   productId: call.text("productId"),
   quantity: call.args["quantity"],
@@ -645,6 +670,17 @@ Future<Object?> _move(OpCall call) async => call.write(() => call.engine.stock.m
   device: call.device.id,
   commandId: call.request.commandId,
 ));
+}
+
+/// The key each stock operation takes: the cloud's route for it (`stock/add`, `stock/remove`…).
+/// An operation the ledger doesn't know is left to it to refuse.
+const _stockKeys = {
+  StockOperations.add: "inventory.restock",
+  StockOperations.remove: "inventory.remove",
+  StockOperations.receiveReturn: "inventory.return",
+  StockOperations.reserve: "inventory.hold",
+  StockOperations.unreserve: "inventory.hold",
+};
 
 Future<Object?> _history(OpCall call) async => call.engine.stock.history(
   call.text("productId"),
@@ -684,9 +720,6 @@ Future<Object?> _openInvoice(OpCall call) async => call.write(() => call.engine.
 Future<Object?> _writeLine(OpCall call) async => call.write(() => call.engine.pos.line(
   call.text("id"),
   call.args,
-  need: (permission) {
-    if (!Permissions.allows(call.connection.grants, permission)) throw const EngineFailure(ErrorCodes.forbidden);
-  },
   actor: call.session.accountId,
   device: call.device.id,
 ));
@@ -718,7 +751,7 @@ Future<Object?> _openInvoices(OpCall call) async {
 // ---------------------------------------------------------------- sales (`sales.md`)
 
 /// `sales.list {section, stage?, channel?, mine?, page?, size?}` (SA-10 to SA-13): a stage names
-/// its own section, whose view permission the session must hold.
+/// its own section. Both sections are the cloud's `sales`, which the op already asks for.
 Future<Object?> _sales(OpCall call) async {
   final stage = call.args["stage"] == null ? null : call.text("stage", max: 32);
   final kind = stage == null ? null : SaleStages.kinds[stage];
@@ -727,9 +760,6 @@ Future<Object?> _sales(OpCall call) async {
   final section = kind?.$1 ?? call.text("section", max: 16);
   if (section != SaleStages.process && section != SaleStages.done) {
     throw const EngineFailure(ErrorCodes.invalidField, {"field": "section"});
-  }
-  if (!Permissions.allows(call.connection.grants, "sales.$section.view")) {
-    throw const EngineFailure(ErrorCodes.forbidden);
   }
 
   final page = _int(call, "page", 1);
@@ -764,10 +794,9 @@ Future<Object?> _fulfil(OpCall call) async => call.write(() => call.engine.sales
   device: call.device.id,
 ));
 
-/// Without `sales.view_all`, a person only reaches the sales they sold, whatever the client sends
+/// Without [Sales.viewAll], a person only reaches the sales they sold, whatever the client sends
 /// (SA-11: the master is the gate).
-String? _seller(OpCall call) =>
-  Permissions.allows(call.connection.grants, Sales.viewAll) ? null : call.session.accountId;
+String? _seller(OpCall call) => _allows(call, Sales.viewAll) ? null : call.session.accountId;
 
 bool _bool(OpCall call, String name) {
   final value = call.args[name];
@@ -789,14 +818,9 @@ Future<Object?> _moneySummary(OpCall call) async {
   return call.engine.finance.summary(from: from);
 }
 
-/// `money.payments.record` (M-1 to M-9): which permission it needs depends on the concept.
-Future<Object?> _recordPayment(OpCall call) async {
-  final concept = Finance.conceptOf(call.args["concept"]);
-  final permission = MoneyConcepts.kinds[concept]!.$3 ? "finance.receivables.collect" : "finance.payments.record";
-  if (!Permissions.allows(call.connection.grants, permission)) throw const EngineFailure(ErrorCodes.forbidden);
-
-  return call.write(() => call.engine.finance.record(call.args, actor: call.session.accountId, device: call.device.id));
-}
+/// `money.payments.record` (M-1 to M-9).
+Future<Object?> _recordPayment(OpCall call) async =>
+  call.write(() => call.engine.finance.record(call.args, actor: call.session.accountId, device: call.device.id));
 
 /// `money.payments.void {id, reason?}` (M-8).
 Future<Object?> _voidPayment(OpCall call) async => call.write(() => call.engine.finance.voidPayment(
@@ -892,15 +916,13 @@ Future<Object?> _exportAccounting(OpCall call) =>
 
 // ---------------------------------------------------------------- employees (`employees.md`)
 
-bool _allows(OpCall call, String permission) => Permissions.allows(call.connection.grants, permission);
-
-/// `employees.list` (E-1): everyone's with `business.employees.view`, else only the viewer's card.
+/// `employees.list` (E-1): everyone's with `employees`, else only the viewer's card.
 Future<Object?> _employees(OpCall call) async =>
   call.engine.employees.list(viewer: call.session.accountId, all: _allows(call, _employeesView));
 
 Future<Object?> _formerEmployees(OpCall call) async => call.engine.employees.former();
 
-/// `employees.detail {id}` (E-3): anyone's with `business.employees.view`, else only one's own;
+/// `employees.detail {id}` (E-3): anyone's with `employees`, else only one's own;
 /// the sealed fields with the `hr` key or the person's own.
 Future<Object?> _employee(OpCall call) {
   final session = call.session.sessionId;
@@ -953,6 +975,75 @@ Future<Object?> _editOwnProfile(OpCall call) async {
 /// `employees.accept {id}`: an invitation to an account that was already active (a rehire).
 Future<Object?> _acceptEmployment(OpCall call) async => call.write(() =>
   call.engine.employees.accept(call.text("id", max: 64), account: call.session.accountId, device: call.device.id));
+
+// ---------------------------------------------------------------- permissions (`session.md`)
+
+Future<Object?> _permissions(OpCall call) async => call.engine.permissions.get(call.session.accountId);
+
+Future<Object?> _templates(OpCall call) async => call.engine.permissions.templates();
+
+Future<Object?> _createTemplate(OpCall call) async =>
+  call.write(() => call.engine.permissions.createTemplate(call.args, actor: call.session.accountId));
+
+Future<Object?> _editTemplate(OpCall call) async => call.write(() => call.engine.permissions.editTemplate(call.args));
+
+Future<Object?> _removeTemplate(OpCall call) async =>
+  call.write(() => call.engine.permissions.removeTemplate(call.args["id"]));
+
+Future<Object?> _members(OpCall call) async => call.engine.permissions.members(call.session.accountId);
+
+Future<Object?> _member(OpCall call) async =>
+  call.engine.permissions.member(call.args["username"], viewer: call.session.accountId);
+
+/// `permissions.members.assign {username, template?, permissions?}` (P-6 to P-9).
+Future<Object?> _assign(OpCall call) async {
+  final answer = call.write(() => call.engine.permissions.assign(
+    call.args,
+    actor: call.session.accountId,
+    mine: call.connection.grant,
+    device: call.device.id,
+  ));
+
+  await _applyGrant(call, answer["username"]);
+
+  return answer;
+}
+
+/// `permissions.members.revoke {username}` (P-6, P-8).
+Future<Object?> _revoke(OpCall call) async {
+  final answer = call.write(() => call.engine.permissions.revoke(
+    call.args["username"],
+    actor: call.session.accountId,
+    mine: call.connection.grant,
+    device: call.device.id,
+  ));
+
+  await _applyGrant(call, answer["username"]);
+
+  return answer;
+}
+
+/// After a member's write (P-8, P-9): their sessions check the new permissions at once, the
+/// sealed scopes they lost are unwrapped, and those they gained are wrapped from the assigner's
+/// session when it holds them (otherwise from the next holder's sign in). Also on a replayed
+/// command, which changes nothing twice.
+Future<void> _applyGrant(OpCall call, Object? username) async {
+  final sealed = call.engine.sealed;
+  final account = call.engine.permissions.accountOf(username);
+  if (account == null) return;
+
+  call.connection.server.regrant(account);
+  sealed.unshare(account);
+  for (final scope in SealedScope.values) {
+    final key = sealed.key(call.session.sessionId, scope);
+    if (key != null) await sealed.share(scope, key);
+  }
+}
+
+Future<Object?> _requests(OpCall call) async => call.engine.permissions.requests(call.session.accountId);
+
+Future<Object?> _request(OpCall call) async =>
+  call.write(() => call.engine.permissions.request(call.args, account: call.session.accountId));
 
 /// `page` ≥ 1 and `size` from 1 to [max].
 (int, int) _paging(OpCall call, int max, int fallback) {

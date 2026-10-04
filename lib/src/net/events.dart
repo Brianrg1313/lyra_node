@@ -5,7 +5,6 @@ import 'package:lyra_protocol/lyra_protocol.dart';
 import 'package:sqlite3/sqlite3.dart';
 
 import '../failure.dart';
-import '../identity/permissions.dart';
 import '../storage/store.dart';
 
 /// One event of the stream, with who may receive it.
@@ -27,7 +26,7 @@ final class StoredEvent {
   /// Only these accounts' sessions receive it (`permissions/changed`).
   final List<String>? accounts;
 
-  /// Only sessions holding one of these permissions receive it.
+  /// Only sessions holding one of these catalog keys receive it.
   final List<String>? permissions;
 
   /// The account the data belongs to: other sessions receive it only holding [overrides]
@@ -35,12 +34,12 @@ final class StoredEvent {
   final String? owner;
   final String? overrides;
 
-  /// Whether a session of [accountId] with [grants] may see it (`protocol-v1.md` §5: a client
+  /// Whether a session of [accountId] holding [grant] may see it (`protocol-v1.md` §5: a client
   /// never receives an event about data it can't read).
-  bool visibleTo(String accountId, Set<String> grants) =>
+  bool visibleTo(String accountId, Grant grant) =>
     (accounts == null || accounts!.contains(accountId)) &&
-    (permissions == null || permissions!.any((permission) => Permissions.allows(grants, permission))) &&
-    (owner == null || owner == accountId || (overrides != null && Permissions.allows(grants, overrides!)));
+    (permissions == null || permissions!.any(grant.can)) &&
+    (owner == null || owner == accountId || (overrides != null && grant.can(overrides!)));
 
   RpcEvent get frame => RpcEvent(event: name, seq: seq, data: data);
 }

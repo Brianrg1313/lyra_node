@@ -36,13 +36,6 @@ void main() {
   Future<Map> fulfil(String id, Map<String, Object?> args) async =>
     await write(Ops.salesFulfil, {"id": id, ...args}) as Map;
 
-  void grant(String account, List<String> permissions) => master.openEngine.store.write((db) {
-    db.execute("DELETE FROM grants WHERE account = ?", [account]);
-    for (final permission in permissions) {
-      db.execute("INSERT INTO grants (account, permission) VALUES (?, ?)", [account, permission]);
-    }
-  });
-
   /// Files [invoice] as sold by another person, who has no session here.
   void soldByAnother(String invoice) => master.openEngine.store.write((db) {
     db.execute(
@@ -209,40 +202,24 @@ void main() {
   });
 
   group('who sees which sales', () {
-    test('without view_all only one\'s own: the list, the detail, the write and the notices (SA-11, SA-13)', () async {
+    test('sales opens the whole board, as the cloud\'s; without it nothing (SA-11, SA-13)', () async {
       final mine = await sale();
       final theirs = await sale(close: false);
       soldByAnother(theirs["id"] as String);
 
       final account = tokens["accountId"] as String;
-      grant(account, ["sales.view", "sales.process.view", "sales.fulfil"]);
+      grantKeys(master.openEngine, account, ["sales", "sales.fulfill"]);
       final (seller, _) = await master.signIn();
 
-      final events = <RpcEvent>[];
-      final subscription = seller.events.listen(events.add);
-      addTearDown(subscription.cancel);
-      await seller.call(Ops.eventsSubscribe);
-
-      expect((await board("process", const {}, seller))["total"], 0);
-      expect((await board("process"))["total"], 1);
-      await expectRefusal(board("done", const {}, seller), ErrorCodes.forbidden);
-      await expectRefusal(seller.call(Ops.salesDetail, args: {"reference": theirs["ticket"]}), "sale_not_found");
-      await expectRefusal(write(Ops.salesFulfil, {"id": theirs["id"], "mode": "pickup"}, as: seller), "sale_not_found");
-
-      // The owner's first session keeps every grant: it writes on both.
-      await write(Ops.posInvoicesLine, {"id": theirs["id"], "productId": cafe, "add": 1});
-      await fulfil(mine["id"], {"mode": "pickup"});
-      await Future<void>.delayed(const Duration(milliseconds: 100));
-
-      final progress = [for (final event in events) if (event.event == Events.saleProgress) event.data as Map];
-      expect(progress, [
-        {
-          "id": mine["id"], "source": "ticket", "ticket": mine["ticket"], "chat": null, "stage": "pickup",
-          "label": "Listo para retirar", "section": "process", "level": "info", "attention": false,
-          "since": progress.single["since"],
-        },
-      ]);
       expect((await board("process", const {}, seller))["total"], 1);
+      await board("done", const {}, seller);
+      await seller.call(Ops.salesDetail, args: {"reference": theirs["ticket"]});
+      await fulfil(mine["id"], {"mode": "pickup"});
+
+      grantKeys(master.openEngine, account, ["pos"]);
+      final (cashier, _) = await master.signIn();
+      await expectRefusal(board("process", const {}, cashier), ErrorCodes.forbidden);
+      await expectRefusal(cashier.call(Ops.salesDetail, args: {"reference": theirs["ticket"]}), ErrorCodes.forbidden);
     });
 
     test('a cancelled invoice leaves both lists: its notice has no section (sales.md, events)', () async {

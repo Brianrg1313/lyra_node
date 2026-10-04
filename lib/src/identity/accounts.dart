@@ -12,6 +12,7 @@ import '../ids.dart';
 import '../oplog/hlc.dart';
 import '../oplog/oplog.dart';
 import '../storage/store.dart';
+import 'grants.dart';
 import 'passwords.dart';
 
 enum AccountStatus { pending, active, disabled }
@@ -35,7 +36,8 @@ final class Account {
     required this.firstName,
     required this.lastName,
     required this.status,
-    required this.grants,
+    required this.grant,
+    required this.isOwner,
     this.email,
     this.mustChangePassword = false,
     this.lastSignIn,
@@ -47,14 +49,13 @@ final class Account {
   final String firstName;
   final String lastName;
   final AccountStatus status;
-  final Set<String> grants;
+  /// What this person may do in the company (`session.md` P-1).
+  final Grant grant;
+
+  /// The account made at setup (S-6).
+  final bool isOwner;
   final bool mustChangePassword;
   final DateTime? lastSignIn;
-
-  bool get isOwner => grants.contains(ownerGrant);
-
-  /// The grant that holds every permission (`session.md` S-6).
-  static const ownerGrant = "*";
 }
 
 /// Local accounts: the owner at setup, invited people (`pending` until activated) and password
@@ -124,7 +125,7 @@ final class Accounts {
         "created, created_hlc, updated_hlc, origin) VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?)",
         [id, username, email, firstName.trim(), lastName.trim(), hash, now, stamp.pack(), stamp.pack(), device],
       );
-      db.execute("INSERT INTO grants (account, permission) VALUES (?, ?)", [id, Account.ownerGrant]);
+      Grants.makeOwner(db, id, now: _now());
 
       // The oplog carries what a client or the sync applies; never a hash.
       Oplog(db).append(
@@ -137,7 +138,6 @@ final class Accounts {
           "email": email,
           "firstName": firstName.trim(),
           "lastName": lastName.trim(),
-          "grants": [Account.ownerGrant],
         },
         device: device,
       );
@@ -145,7 +145,7 @@ final class Accounts {
         AuditKinds.accountCreated,
         actor: id,
         device: device,
-        data: {"account": id, "grants": [Account.ownerGrant]},
+        data: {"account": id, "owner": true},
       );
 
       return byId(id)!;
@@ -191,10 +191,7 @@ final class Accounts {
       actor: actor,
       device: device,
     );
-    AuditLog(_db, now: _now).append(AuditKinds.accountCreated, actor: actor, device: device, data: {
-      "account": id,
-      "grants": const <String>[],
-    });
+    AuditLog(_db, now: _now).append(AuditKinds.accountCreated, actor: actor, device: device, data: {"account": id});
 
     return id;
   }
@@ -451,10 +448,8 @@ final class Accounts {
     status: AccountStatus.values.byName(row["status"] as String),
     mustChangePassword: row["must_change_password"] == 1,
     lastSignIn: row["last_sign_in"] == null ? null : DateTime.parse(row["last_sign_in"] as String),
-    grants: {
-      for (final grant in _db.select("SELECT permission FROM grants WHERE account = ?", [row["id"]]))
-        grant["permission"] as String,
-    },
+    grant: Grants.of(_db, row["id"] as String),
+    isOwner: Grants.owner(_db) == row["id"],
   );
 
   /// A free username from an e-mail's local part (S-1): its allowed characters, starting with a

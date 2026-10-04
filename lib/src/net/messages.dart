@@ -94,6 +94,18 @@ abstract final class Messages {
     "profile_locked": "Personal data can only be edited while the person works here.",
     "manager_cycle": "That person reports, directly or not, to this one.",
     "invalid_dates": "The start date must be on or before the end date.",
+    "permission_member_not_found": "Nobody with that username has access to, or a job at, this company.",
+    "permissions_self": "You can't change your own permissions.",
+    "permissions_owner": "The owner always has every permission.",
+    "escalation": "You can only give or take away permissions you have yourself.",
+    "permissions_invalid": "That permission doesn't exist.",
+    "permission_template_not_found": "That template doesn't exist.",
+    "permission_template_global": "Lyra's templates can't be changed: make a copy instead.",
+    "permission_template_name_taken": "Another template already has that name.",
+    "permission_request_invalid": "That permission doesn't exist.",
+    "permission_request_owner": "Only the owner holds that permission.",
+    "permission_request_granted": "You already have that permission.",
+    "permission_request_pending": "You already asked for that permission.",
   };
 
   /// Codes whose client must go somewhere (`ErrorActions`).

@@ -7,6 +7,7 @@ import 'package:lyra_protocol/lyra_protocol.dart';
 
 import '../engine.dart';
 import '../failure.dart';
+import '../identity/grants.dart';
 import '../identity/sessions.dart';
 import '../process/engine_log.dart';
 import 'files.dart';
@@ -148,6 +149,16 @@ final class LanServer {
     }
   }
 
+  /// [account]'s permissions changed (`session.md` P-8): its connections check the new ones from
+  /// the next frame. The `permissions/changed` event, appended in the same write, tells the app.
+  void regrant(String account) {
+    final grant = Grants.of(engine!.store.db, account);
+
+    for (final connection in _connections) {
+      if (connection.session?.accountId == account) connection.grant = grant;
+    }
+  }
+
   void forget(RpcConnection connection) => _connections.remove(connection);
 
   Future<void> close() async {
@@ -285,7 +296,7 @@ final class LanServer {
         final file = await engine.files.get(
           request.uri.pathSegments[1],
           account: account.id,
-          grants: account.grants,
+          grant: account.grant,
           size: int.tryParse(request.uri.queryParameters["size"] ?? ""),
         );
 

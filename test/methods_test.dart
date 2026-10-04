@@ -59,12 +59,12 @@ void main() {
       expect(restarted.key(session.session, SealedScope.payments), isNull);
 
       final rotated = engine.sessions.refresh(session.refresh, deviceId: engine.devices.master!.id);
-      await restarted.refreshed(session.session, grants: {"*"}, previous: session.refresh, next: rotated.refreshToken);
+      await restarted.refreshed(session.session, grant: Grant.everything(), previous: session.refresh, next: rotated.refreshToken);
       expect(restarted.key(session.session, SealedScope.payments), key);
 
       // The spent token no longer opens it; the session ending drops it.
       final again = SealedKeys(engine.store, params: fastParams);
-      await again.refreshed(session.session, grants: {"*"}, previous: session.refresh, next: "x");
+      await again.refreshed(session.session, grant: Grant.everything(), previous: session.refresh, next: "x");
       expect(again.key(session.session, SealedScope.payments), isNull);
 
       engine.sessions.end(session.session);
@@ -88,18 +88,19 @@ void main() {
 
       final restarted = SealedKeys(engine.store, params: fastParams);
       final rotated = engine.sessions.refresh(session.refresh, deviceId: engine.devices.master!.id);
-      await restarted.refreshed(session.session, grants: {"*"}, previous: session.refresh, next: rotated.refreshToken);
+      await restarted.refreshed(session.session, grant: Grant.everything(), previous: session.refresh, next: rotated.refreshToken);
       expect(await restarted.openWithOwn(restarted.own(session.session)!, toPerson, context: "y"), "mine");
 
       expect(await engine.sealed.sealToAccount("nobody", "x", context: "y"), isNull, reason: "no key pair yet");
     });
 
-    test('a refresh keeps only the scopes the grants still hold', () async {
+    test('a refresh keeps only the scopes the grant still holds', () async {
       final session = await signIn(owner.password);
       final rotated = engine.sessions.refresh(session.refresh, deviceId: engine.devices.master!.id);
 
       await engine.sealed.refreshed(session.session,
-        grants: {"finance.view"}, previous: session.refresh, next: rotated.refreshToken);
+        grant: Grant(sections: PermissionCatalog.fromKeys(["pos"])), previous: session.refresh,
+        next: rotated.refreshToken);
 
       expect(engine.sealed.key(session.session, SealedScope.payments), isNull);
     });
@@ -125,10 +126,7 @@ void main() {
 
     test('someone who doesn\'t hold the permission opens nothing', () async {
       final account = engine.accounts.byId(engine.store.db.select("SELECT id FROM accounts").first["id"] as String)!;
-      engine.store.write((db) {
-        db.execute("DELETE FROM grants");
-        db.execute("INSERT INTO grants (account, permission) VALUES (?, 'finance.view')", [account.id]);
-      });
+      grantKeys(engine, account.id, ["pos"]);
 
       final session = await signIn(owner.password);
 
@@ -330,10 +328,7 @@ void main() {
     test('each op asks for its own permission (money.md ops)', () async {
       final account = tokens["accountId"] as String;
       final id = (await create(pagoMovil))["id"];
-      master.openEngine.store.write((db) {
-        db.execute("DELETE FROM grants WHERE account = ?", [account]);
-        db.execute("INSERT INTO grants (account, permission) VALUES (?, 'finance.methods.view')", [account]);
-      });
+      grantKeys(master.openEngine, account, ["money"]);
       final (viewer, _) = await master.signIn();
 
       expect((await list(viewer)).single["document"], "V-12345678");
@@ -342,9 +337,7 @@ void main() {
       await expectRefusal(write(Ops.moneyMethodsEdit, {"id": id, "label": "x"}, as: viewer), ErrorCodes.forbidden);
       await expectRefusal(write(Ops.moneyMethodsRemove, {"id": id}, as: viewer), ErrorCodes.forbidden);
 
-      master.openEngine.store.write((db) {
-        db.execute("UPDATE grants SET permission = 'finance.view' WHERE account = ?", [account]);
-      });
+      grantKeys(master.openEngine, account, ["pos"]);
       final (outsider, _) = await master.signIn();
       await expectRefusal(outsider.call(Ops.moneyMethodsList), ErrorCodes.forbidden);
       await expectRefusal(outsider.call(Ops.moneyMethodsRails), ErrorCodes.forbidden);

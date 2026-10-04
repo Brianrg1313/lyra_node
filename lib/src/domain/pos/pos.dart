@@ -36,7 +36,7 @@ final class Pos {
   Database get _db => _store.db;
 
   /// Who receives `invoice/*` (`pos.md`, events).
-  static const audience = ["pos.view", "sales.view"];
+  static const audience = ["pos", "sales"];
 
   static const _open = "open";
   static const _closed = "closed";
@@ -213,10 +213,9 @@ final class Pos {
   }
 
   /// `pos.invoices.line {id, productId | lineId | concept + price, add | quantity, tax?}`
-  /// (POS-11 to POS-18). [need] refuses a write the session may not make: a typed-in charge
-  /// (`pos.custom_amount`) or a rate that changes (`pos.set_tax`).
+  /// (POS-11 to POS-18). A typed-in charge and a changed rate are `pos.sell`, like any line: the
+  /// cloud has no key of their own (`session.md` P-4).
   Map<String, Object?> line(String id, Map<String, Object?> args, {
-    required void Function(String permission) need,
     String? actor,
     String? device,
   }) => _store.write((db) {
@@ -256,7 +255,6 @@ final class Pos {
     final after = quantity as int? ?? before + (add as int);
     if (after > PosLimits.maxUnits) throw const EngineFailure("too_many_units", {"max": PosLimits.maxUnits});
 
-    if (rate != null && rate != (current?["tax_rate"] as String? ?? invoice["default_tax"])) need("pos.set_tax");
 
     if (current == null) {
       if (after <= 0) throw EngineFailure(ErrorCodes.invalidField, {"field": add == null ? "quantity" : "add"});
@@ -265,7 +263,6 @@ final class Pos {
       final line = newId();
 
       if (concept != null) {
-        need("pos.custom_amount");
         if (concept is! String || concept.trim().isEmpty || concept.trim().length > PosLimits.maxConcept) {
           throw const EngineFailure(ErrorCodes.invalidField, {"field": "concept"});
         }

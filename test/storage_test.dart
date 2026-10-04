@@ -164,5 +164,40 @@ void main() {
       final versions = [for (final m in migrations) m.version];
       expect(versions, [for (var i = 1; i <= versions.length; i++) i], reason: "numbered 1, 2, 3… with no gaps");
     });
+
+    test('12 turns the grants into members: the * row is the owner, a job admits, stored area ids become keys', () {
+      final store = Store.open(paths.database, key(1));
+      addTearDown(store.close);
+      migrate(store, backups: paths.backups, steps: migrations.where((m) => m.version < 12).toList());
+
+      store.write((db) {
+        for (final (id, name) in [("a", "ada"), ("g", "grace"), ("x", "gone")]) {
+          db.execute("INSERT INTO accounts (id, username, first_name, last_name, status, created, created_hlc, "
+            "updated_hlc) VALUES (?, ?, 'N', 'L', 'active', 't', 'h', 'h')", [id, name]);
+        }
+        db.execute("INSERT INTO grants (account, permission) VALUES ('a', '*'), ('g', 'pos.view'), ('x', 'pos.view')");
+        db.execute("INSERT INTO employments (id, account, state, job_title, invited, created_hlc, updated_hlc) "
+          "VALUES ('e1', 'g', 'active', 'Barista', 't', 'h', 'h'), ('e2', 'x', 'ended', 'Cook', 't', 'h', 'h')");
+        db.execute("INSERT INTO files (id, purpose, content_type, size, owner, permission, created, referenced) VALUES "
+          "('logo', 'logo', 'image/png', 1, 'a', 'business.view', 't', 1), "
+          "('photo', 'product_image', 'image/png', 1, 'a', 'inventory.view', 't', 1)");
+        db.execute("INSERT INTO events (at, name, data, audience) VALUES ('t', 'sale/progress', '{}', "
+          "'{\"anyOf\":[\"sales.view\"],\"owner\":\"g\",\"overrides\":\"sales.view_all\"}')");
+      });
+
+      expect(migrate(store, backups: paths.backups), [12]);
+
+      final db = store.db;
+      expect(Grants.owner(db), "a");
+      expect(Grants.of(db, "a").all, isTrue);
+      expect(Grants.read(db, "g")?.access, isTrue, reason: "an active job admits");
+      expect(Grants.of(db, "g").areas, ["business.view", "business.branches.view"], reason: "with nothing granted");
+      expect(Grants.read(db, "x"), isNull, reason: "an ended job doesn't");
+      expect(db.select("SELECT name FROM sqlite_master WHERE name = 'grants'"), isEmpty);
+      expect({for (final row in db.select("SELECT id, permission FROM files")) row["id"]: row["permission"]},
+        {"logo": null, "photo": "products"});
+      expect(jsonDecode(db.select("SELECT audience FROM events").single["audience"] as String),
+        {"anyOf": ["sales"], "owner": "g", "overrides": "sales"});
+    });
   });
 }

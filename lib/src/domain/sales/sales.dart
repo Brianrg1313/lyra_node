@@ -28,8 +28,9 @@ final class Sales {
 
   Database get _db => _store.db;
 
-  /// Who may read any sale, not only the ones they sold (SA-11).
-  static const viewAll = "sales.view_all";
+  /// Who may read any sale, not only the ones they sold (SA-11): the cloud lists every sale to
+  /// whoever holds `sales`.
+  static const viewAll = "sales";
 
   /// `sales.catalog`: the stages a master measures, the handover modes and the channels (SA-2).
   Map<String, Object?> catalog() {
@@ -262,7 +263,7 @@ final class Sales {
       "ticket": invoice["ticket"],
       "chat": null,
       ..._standing(measure(invoice), language),
-    }, at: at, permission: "sales.view", owner: invoice["seller"] as String?, overrides: viewAll);
+    }, at: at, permission: "sales", owner: invoice["seller"] as String?, overrides: viewAll);
 
   /// `stage`, `label`, `section`, `level`, `attention` and `since` of a measurement.
   static Map<String, Object?> _standing((String, String?)? measured, String language) {

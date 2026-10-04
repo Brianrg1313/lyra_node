@@ -45,6 +45,11 @@ abstract final class AuditKinds {
 
   /// An accounting export was made (M-65): the window, the datasets, the format and the rows.
   static const accountingExported = "export.accounting";
+
+  /// A member's permissions written, or their access taken away (`session.md` P-6): who, by
+  /// whom, which keys changed, from which template.
+  static const permissionsAssigned = "permissions.assigned";
+  static const permissionsRevoked = "permissions.revoked";
 }
 
 final class AuditEntry {

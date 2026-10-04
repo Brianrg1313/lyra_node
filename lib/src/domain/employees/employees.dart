@@ -7,6 +7,7 @@ import '../../audit/audit_log.dart';
 import '../../crypto/sealed.dart';
 import '../../failure.dart';
 import '../../identity/accounts.dart';
+import '../../identity/grants.dart';
 import '../../ids.dart';
 import '../../oplog/hlc.dart';
 import '../../oplog/oplog.dart';
@@ -372,7 +373,8 @@ final class Employees {
       [_now().toUtc().toIso8601String(), stamp.pack(), id],
     );
     Oplog(_db).append(hlc: stamp, entity: "employment", entityId: id, kind: "accepted",
-      payload: {"state": "active"}, actor: account, device: device);
+      payload: {"state": "active"}, actor: account, device: device);    // A job is membership (`session.md` P-5): in, with nothing granted until someone assigns it.
+    Grants.admit(_db, account, now: _now());
   }
 
   // ---------------------------------------------------------------- employees.edit / profile.edit

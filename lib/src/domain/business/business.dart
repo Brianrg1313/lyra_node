@@ -72,8 +72,9 @@ final class Business {
 
   Database get _db => _store.db;
 
-  /// Who receives `business/changed`: whoever can read the profile.
-  static const viewPermission = "business.view";
+  /// Who receives `business/changed` and reads the logo: every member, as the cloud's company
+  /// list shows its name and logo to all of them.
+  static const String? viewPermission = null;
 
   /// Longest text each field takes.
   static const _limits = {

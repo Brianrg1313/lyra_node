@@ -24,7 +24,7 @@ final class Stock {
   Database get _db => _store.db;
 
   /// Who receives `stock/changed`: the stock screen and the tills (`pos.md`, events).
-  static const audience = [Inventory.viewPermission, "pos.view"];
+  static const audience = ["inventory", Inventory.viewPermission, "pos"];
 
   static const maxQuantity = 1000000;
 

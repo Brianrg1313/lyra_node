@@ -2,22 +2,24 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:cryptography/cryptography.dart';
+import 'package:lyra_protocol/lyra_protocol.dart' show Grant;
 
 import '../audit/audit_log.dart';
 import '../identity/accounts.dart';
-import '../identity/permissions.dart';
+import '../identity/grants.dart';
 import '../storage/store.dart';
 import 'envelope.dart';
 import 'recovery.dart';
 import 'secrets.dart';
 
-/// What a sealed key guards, and the permission that holds it (plan §6.3).
+/// What a sealed key guards, and the catalog key that holds it (plan §6.3, `session.md` P-9):
+/// what the cloud requires for the screens that show those fields.
 enum SealedScope {
   /// Employees' private fields and salaries.
-  hr("business.employees.view_personal"),
+  hr("employees"),
 
   /// The holder, document and number of the company's payment accounts (`money.md` M-45).
-  payments("finance.methods.view");
+  payments("money");
 
   const SealedScope(this.permission);
 
@@ -94,7 +96,7 @@ final class SealedKeys {
   }) async {
     final scopes = [
       for (final scope in SealedScope.values)
-        if (Permissions.allows(account.grants, scope.permission)) scope,
+        if (account.grant.can(scope.permission)) scope,
     ];
 
     final pair = await _pair(account.id, password);
@@ -110,14 +112,17 @@ final class SealedKeys {
     _open[sessionId] = keys;
     _own[sessionId] = own;
     await _keep(sessionId, refreshToken, keys, own);
+    for (final MapEntry(:key, :value) in keys.entries) {
+      await share(key, value);
+    }
   }
 
   /// After `auth.refresh` rotated [previous] into [next]: the session's keys move to the new
-  /// token, keeping only the scopes [grants] still hold. This is also how they come back after an
+  /// token, keeping only the scopes [grant] still holds. This is also how they come back after an
   /// engine restart, since access tokens don't survive one and every client refreshes first.
   Future<void> refreshed(
     String sessionId, {
-    required Set<String> grants,
+    required Grant grant,
     required String previous,
     required String next,
   }) async {
@@ -132,7 +137,7 @@ final class SealedKeys {
       final entries = jsonDecode(utf8.decode(clear)) as Map<String, Object?>;
       keys = {
         for (final MapEntry(:key, :value) in entries.entries)
-          if (key != _ownEntry && Permissions.allows(grants, SealedScope.values.byName(key).permission))
+          if (key != _ownEntry && grant.can(SealedScope.values.byName(key).permission))
             SealedScope.values.byName(key): base64.decode(value as String),
       };
       own = entries[_ownEntry] is String ? base64.decode(entries[_ownEntry]! as String) : null;
@@ -154,6 +159,49 @@ final class SealedKeys {
       await _scopePair(key, value);
     }
     await _keep(sessionId, next, keys, own);
+    for (final MapEntry(:key, :value) in keys.entries) {
+      await share(key, value);
+    }
+  }
+
+  /// Wraps [scope]'s [key] to every account that holds the scope, has a key pair and no wrap yet
+  /// (`session.md` P-9): a member given the permission gets the key from whichever holder's
+  /// session has it next, the assigner's own at once.
+  Future<void> share(SealedScope scope, Uint8List key) async {
+    final rows = _store.db.select(
+      "SELECT k.account, k.public FROM account_keys k "
+      "LEFT JOIN sealed_keys s ON s.scope = ? AND s.holder = k.account WHERE s.holder IS NULL",
+      [scope.name],
+    );
+
+    for (final row in rows) {
+      final account = row["account"] as String;
+      if (!Grants.of(_store.db, account).can(scope.permission)) continue;
+
+      final wrap = await _wrap(scope, account, SimplePublicKey(row["public"] as Uint8List, type: KeyPairType.x25519), key);
+      _store.write((db) => db.execute(
+        "INSERT OR IGNORE INTO sealed_keys (scope, holder, wrap, created) VALUES (?, ?, ?, ?)",
+        [scope.name, account, wrap, _now().toUtc().toIso8601String()],
+      ));
+    }
+  }
+
+  /// Deletes [account]'s wraps of the scopes it no longer holds (P-9). Their open sessions drop
+  /// those keys at their next refresh, which keeps only what the grant still holds.
+  void unshare(String account) {
+    final grant = Grants.of(_store.db, account);
+
+    for (final scope in SealedScope.values) {
+      if (grant.can(scope.permission)) continue;
+
+      _store.write((db) => db.execute("DELETE FROM sealed_keys WHERE scope = ? AND holder = ?", [scope.name, account]));
+      for (final MapEntry(key: session, value: keys) in _open.entries) {
+        if (_store.db.select("SELECT 1 FROM sessions WHERE id = ? AND account = ?", [session, account]).isNotEmpty) {
+          final dropped = keys.remove(scope);
+          if (dropped != null) wipe(dropped);
+        }
+      }
+    }
   }
 
   /// The [scope] key [sessionId] opened, or null: not signed in with a password, not a holder,

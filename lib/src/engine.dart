@@ -16,12 +16,14 @@ import 'domain/export/accounting.dart';
 import 'domain/inventory/inventory.dart';
 import 'domain/money/finance.dart';
 import 'domain/money/methods.dart';
+import 'domain/permissions/permissions.dart';
 import 'domain/pos/pos.dart';
 import 'domain/sales/sales.dart';
 import 'domain/stock/stock.dart';
 import 'failure.dart';
 import 'identity/accounts.dart';
 import 'identity/devices.dart';
+import 'identity/grants.dart';
 import 'identity/passwords.dart';
 import 'identity/sessions.dart';
 import 'ids.dart';
@@ -165,6 +167,8 @@ final class Engine {
 
   late final Employees employees = Employees(store, clock, business, accounts, sealed, now: _now);
 
+  late final Permissions permissions = Permissions(store, now: _now);
+
   /// The edge sync with the cloud (plan §9): one instance for the engine's life, the runner's loop
   /// and the ops share it. Its key pair is sealed with a key of its own purpose.
   late final EdgeSync edge = EdgeSync(
@@ -263,11 +267,7 @@ final class Engine {
     return label;
   }
 
-  String? get _owner {
-    final rows = store.db.select("SELECT account FROM grants WHERE permission = '*' ORDER BY account LIMIT 1");
-
-    return rows.isEmpty ? null : rows.first["account"] as String;
-  }
+  String? get _owner => Grants.owner(store.db);
 
   /// The name of the control key in the OS vault (`ControlChannel`, `EngineStatusFile`).
   static String controlKeyName(String instanceId) => "control.$instanceId";

@@ -3,12 +3,11 @@ import 'dart:isolate';
 import 'dart:typed_data';
 
 import 'package:image/image.dart' as img;
-import 'package:lyra_protocol/lyra_protocol.dart' show FileSizes;
+import 'package:lyra_protocol/lyra_protocol.dart' show FileSizes, Grant;
 import 'package:path/path.dart' as p;
 
 import '../crypto/envelope.dart';
 import '../failure.dart';
-import '../identity/permissions.dart';
 import '../ids.dart';
 import '../storage/store.dart';
 
@@ -141,23 +140,24 @@ final class FileStore {
   /// A referenced file's readers besides its permission's, by purpose: a till draws the product
   /// pictures without seeing the inventory (`pos.md` POS-1). Read here and not stored, so the
   /// images claimed before the POS release are covered too.
-  static final Map<String, String> _alsoReadBy = {FilePurpose.productImage.header: "pos.view"};
+  static final Map<String, String> _alsoReadBy = {FilePurpose.productImage.header: "pos"};
 
-  /// Reads [id] for [account] holding [grants]: the file's permission once a record references
-  /// it, its uploader until then. Anything else is `not_found`, so ids can't be probed.
+  /// Reads [id] for [account] holding [grant]: the file's permission once a record references
+  /// it (none: every member), its uploader until then. Anything else is `not_found`, so ids can't
+  /// be probed.
   ///
   /// [size] asks for the thumbnail (`protocol-v1.md` §6): an image's is [thumbnailWidth] wide;
   /// a file without one (small already, or not an image) answers the original.
-  Future<StoredFile> get(String id, {required String account, required Set<String> grants, int? size}) async {
+  Future<StoredFile> get(String id, {required String account, required Grant grant, int? size}) async {
     final rows = _store.db.select("SELECT * FROM files WHERE id = ?", [id]);
     if (rows.isEmpty) throw const EngineFailure("not_found");
 
     final row = rows.first;
     final permission = row["permission"] as String?;
     final also = _alsoReadBy[row["purpose"]];
-    final allowed = permission == null
+    final allowed = row["referenced"] == 0
       ? row["owner"] == account
-      : Permissions.allows(grants, permission) || also != null && Permissions.allows(grants, also);
+      : permission == null || grant.can(permission) || also != null && grant.can(also);
     final file = File(p.join(_folder, id));
     // An export is valid for [orphanAge] (M-60), not until the next sweep happens to run.
     final expired = row["purpose"] == FilePurpose.export.header &&
@@ -180,9 +180,9 @@ final class FileStore {
   }
 
   /// A record takes [id] (a logo, a product image): from now on whoever holds [permission]
-  /// reads it, and the sweep leaves it alone. Only its [uploader]'s fresh upload of [purpose]
+  /// (null: every member) reads it, and the sweep leaves it alone. Only its [uploader]'s fresh upload of [purpose]
   /// can be taken; anything else is `invalid_file`. Runs inside the op's write.
-  void claim(String id, FilePurpose purpose, {required String permission, required String uploader}) {
+  void claim(String id, FilePurpose purpose, {required String? permission, required String uploader}) {
     final rows = _store.db.select("SELECT * FROM files WHERE id = ?", [id]);
     final row = rows.isEmpty ? null : rows.first;
 

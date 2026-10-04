@@ -34,13 +34,6 @@ void main() {
     return await write(Ops.posInvoicesClose, {"id": invoice["id"], "method": "transfer"}) as Map;
   }
 
-  void grant(String account, List<String> permissions) => master.openEngine.store.write((db) {
-    db.execute("DELETE FROM grants WHERE account = ?", [account]);
-    for (final permission in permissions) {
-      db.execute("INSERT INTO grants (account, permission) VALUES (?, ?)", [account, permission]);
-    }
-  });
-
   String daysAgo(int days) => DateTime.now().toUtc().subtract(Duration(days: days)).toIso8601String();
 
   setUp(() async {
@@ -242,22 +235,25 @@ void main() {
     });
   });
 
-  test('each op asks for its own permission; collecting a credit sale asks for another (money.md ops)', () async {
+  test('each op asks for its cloud route\'s key: reading is money, charging and collecting money.charge (money.md ops)', () async {
     final account = tokens["accountId"] as String;
-    grant(account, ["finance.view", "finance.payments.view", "finance.payments.record"]);
+    grantKeys(master.openEngine, account, ["money", "money.charge"]);
     final (clerk, _) = await master.signIn();
 
     final payment = await record({"concept": "supplier", "amount": 100, "method": "cash"}, as: clerk);
     expect((await clerk.call(Ops.moneyPaymentsSearch) as Map)["total"], 1);
     await clerk.call(Ops.moneyCatalog);
+    await clerk.call(Ops.moneySummary);
+    await clerk.call(Ops.moneyReceivables);
+    await clerk.call(Ops.moneyCurrenciesGet);
 
-    await expectRefusal(record({"concept": "settlement", "amount": 100, "method": "cash"}, as: clerk),
-      ErrorCodes.forbidden);
     await expectRefusal(write(Ops.moneyPaymentsVoid, {"id": payment["id"]}, as: clerk), ErrorCodes.forbidden);
-    await expectRefusal(clerk.call(Ops.moneySummary), ErrorCodes.forbidden);
-    await expectRefusal(clerk.call(Ops.moneyReceivables), ErrorCodes.forbidden);
-    await expectRefusal(clerk.call(Ops.moneyCurrenciesGet), ErrorCodes.forbidden);
     await expectRefusal(write(Ops.moneyCurrenciesSave, {"currency": "VES", "mode": "official"}, as: clerk),
+      ErrorCodes.forbidden);
+
+    grantKeys(master.openEngine, account, ["money"]);
+    final (reader, _) = await master.signIn();
+    await expectRefusal(record({"concept": "settlement", "amount": 100, "method": "cash"}, as: reader),
       ErrorCodes.forbidden);
   });
 }

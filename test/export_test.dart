@@ -229,10 +229,7 @@ void main() {
       await expectRefusal(ask({"format": "pdf"}), ErrorCodes.invalidField);
 
       final account = tokens["accountId"] as String;
-      master.openEngine.store.write((db) {
-        db.execute("DELETE FROM grants WHERE account = ?", [account]);
-        db.execute("INSERT INTO grants (account, permission) VALUES (?, 'finance.view')", [account]);
-      });
+      grantKeys(master.openEngine, account, ["money"]);
       final (clerk, _) = await master.signIn();
       await expectRefusal(
         clerk.call(Ops.exportAccounting, args: {"from": day, "to": day, "format": "csv", "datasets": ["sales"]}),
@@ -260,12 +257,12 @@ void main() {
       final id = await engine.files.keep(FilePurpose.export, Uint8List.fromList([0x50, 0x4b, 3, 4]),
         contentType: ExportFormat.csv.contentType, owner: owner);
 
-      expect((await engine.files.get(id, account: owner, grants: {"*"})).contentType, "application/zip");
-      await expectLater(engine.files.get(id, account: "someone else", grants: {"*"}),
+      expect((await engine.files.get(id, account: owner, grant: Grant.everything())).contentType, "application/zip");
+      await expectLater(engine.files.get(id, account: "someone else", grant: Grant.everything()),
         throwsA(isA<EngineFailure>().having((failure) => failure.code, "code", "not_found")));
 
       now = now.add(const Duration(minutes: 61));
-      await expectLater(engine.files.get(id, account: owner, grants: {"*"}),
+      await expectLater(engine.files.get(id, account: owner, grant: Grant.everything()),
         throwsA(isA<EngineFailure>().having((failure) => failure.code, "code", "not_found")));
       expect(engine.files.sweep(), 1);
 

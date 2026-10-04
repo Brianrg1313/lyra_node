@@ -57,6 +57,11 @@ one writer. Phase 2 built storage, keys, oplog, identities, audit and the proces
 - `lib/src/storage/migrations/m010_cloud_link.dart` — `company.cloud_id` (the cloud company it is one with).
 - `lib/src/storage/migrations/m011_sync.dart` — `sync_link` (the enrolment, cursors), `sync_ids` (cloud ↔ local),
   `sync_fields` (each synced field's stamp), `sync_pulled`, `sync_rejected`, `sync_conflicts` (the inbox).
+- `lib/src/storage/migrations/m012_permissions.dart` — `members` (the cloud's per-person document), `permission_templates`,
+  `permission_requests`, `meta.owner`; `grants` dropped, stored area ids on files and events made catalog keys.
+- `lib/src/domain/permissions/permissions.dart` — `Permissions`: the cloud's `Members`, `Templates` and `Requests` (`get`,
+  `templates` + create/edit/remove, `members`, `member`, `assign`, `revoke`, `requests`, `request`, `accountOf`):
+  `session.md` session.permissions.
 - `lib/src/domain/employees/employees.dart` — `Employees` (`list` shaped by permission, `former`, `detail` with the
   E-4 measures and the sealed fields of `hr` or one's own, `invite` with a pending account and its code,
   `reissueActivation`, `accept`, `acceptInvitations`, `draftEdit` / `draftOwn` checked and sealed before `save`),
@@ -103,7 +108,8 @@ one writer. Phase 2 built storage, keys, oplog, identities, audit and the proces
   `Device`, `DeviceKind` (`master`, `native`, `web`).
 - `lib/src/identity/sessions.dart` — `Sessions` (access tokens in memory, rotated refresh tokens, reuse ends the session),
   `SessionTokens`, `SessionGrant`, `SessionScope`.
-- `lib/src/identity/permissions.dart` — `Permissions.allows` (`session.md` P-1).
+- `lib/src/identity/grants.dart` — `Grants` (a person's `Grant` with the owner measured, `read`, `hasAccess`, `admit`,
+  `revoke`, `write` normalized, `makeOwner`), `MemberRow`, `TemplateRef`: `session.md` P-1, P-2, P-5.
 - `lib/src/net/x509.dart` — `X509` (the two roots of the installation CA, server and device certificates), `Certificate`.
 - `lib/src/net/tls.dart` — `LocalAddresses`, `Authority` (CA key and roots in `meta`, issues), `Transport`
   (`transport.json`, sealed with a control-key subkey: what TLS needs while locked, the `.local` `host` too;
@@ -160,6 +166,8 @@ one writer. Phase 2 built storage, keys, oplog, identities, audit and the proces
 - `test/methods_test.dart` — the sealed keys (first holder, recovery wrap, refresh and restart, grants, password
   change, sealing to a scope or a person with no key in hand) and the accounts over the LAN: rails per country, sheets, nothing sealed in clear at rest (rows, ledger,
   oplog), refusals, edits, payments naming one, a session without the key, permissions.
+- `test/permissions_test.dart` — the cloud's permissions over the LAN: a job admits with nothing, templates copied and
+  `custom`, self/owner/escalation refusals, unknown keys, revoke and back, company templates, requests, live regrant.
 - `test/employees_test.dart` — the staff over the LAN: invitations and their code shown once, activation and its
   refusals, the list shaped by permission, job edits and their checks, the E-4 measures, sealed pay and profile never
   in clear (rows, oplog, ledger), the person's own reads and writes, the copy made for a person who had no key.
@@ -187,6 +195,10 @@ one writer. Phase 2 built storage, keys, oplog, identities, audit and the proces
 - A change, its oplog entry, its audit entry and its `commandId` answer are written in the **same** `Store.write`
   (a nested `write` joins the running one; write ops commit through `OpCall.write`).
 - Migrations are forward only: a released one is never edited.
+- Permissions are the cloud's (`session.md` session.permissions): every op declares one catalog key, as its cloud
+  route does, and is checked against `Grants.of`; nothing grants by area id. The vocabulary is `lyra_protocol`'s copy
+  of the backend's, never edited here first. A member's write calls `LanServer.regrant` and the sealed-key
+  `share`/`unshare` (`_applyGrant` in `ops.dart`).
 - The engine never starts by itself (plan D4): nothing here installs a service, login item or scheduled task.
 - Lifecycle control (status, stop) is files in the data folder signed with the control key (vault); the signed state
   file is how the app knows the process is ours. Everything else, the master's own app included, goes through

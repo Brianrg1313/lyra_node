@@ -8,7 +8,6 @@ import 'package:lyra_protocol/lyra_protocol.dart';
 import '../engine.dart';
 import '../failure.dart';
 import '../identity/devices.dart';
-import '../identity/permissions.dart';
 import '../identity/sessions.dart';
 import '../oplog/commands.dart';
 import 'events.dart';
@@ -136,7 +135,8 @@ final class RpcConnection {
 
   Device? device;
   SessionGrant? session;
-  Set<String> grants = const {};
+  /// What the bound session's person may do; replaced at once when it changes (`session.md` P-8).
+  Grant grant = Grant.none();
   String? _accessToken;
   bool _helloDone = false;
   bool _revoked = false;
@@ -262,7 +262,7 @@ final class RpcConnection {
     }
 
     if (rule.permission != null) {
-      if (!Permissions.allows(grants, rule.permission!)) return failed(ErrorCodes.forbidden);
+      if (!grant.can(rule.permission!)) return failed(ErrorCodes.forbidden);
       // A PIN session runs POS ops only (S-22).
       if (session?.scope == SessionScope.pos && !rule.permission!.startsWith("pos.")) return failed(ErrorCodes.forbidden);
     }
@@ -317,17 +317,17 @@ final class RpcConnection {
   void helloDone() => _helloDone = true;
 
   /// Ties the connection to a session (`session.bind`, S-20).
-  void bind(String accessToken, SessionGrant grant, Set<String> accountGrants) {
+  void bind(String accessToken, SessionGrant grant, Grant permissions) {
     _accessToken = accessToken;
     session = grant;
-    grants = accountGrants;
+    this.grant = permissions;
     _revoked = false;
   }
 
   void unbind() {
     _accessToken = null;
     session = null;
-    grants = const {};
+    grant = Grant.none();
     unsubscribe();
   }
 
@@ -368,7 +368,7 @@ final class RpcConnection {
     if (bound == null || event.seq <= _lastEventSeq) return;
 
     _lastEventSeq = event.seq;
-    if (event.visibleTo(bound.accountId, grants)) _socket.add(event.frame.encode());
+    if (event.visibleTo(bound.accountId, grant)) _socket.add(event.frame.encode());
   }
 
   bool _take() {

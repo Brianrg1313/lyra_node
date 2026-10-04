@@ -31,7 +31,7 @@ final class Inventory {
   Database get _db => _store.db;
 
   /// Who reads tables and receives `table/changed`.
-  static const viewPermission = "inventory.view";
+  static const viewPermission = "products";
 
   /// Images per cell (I-30).
   static const maxImages = 8;

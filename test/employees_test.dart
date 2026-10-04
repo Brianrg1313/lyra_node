@@ -328,13 +328,6 @@ void main() {
   });
 
   group('permissions', () {
-    void grant(String account, List<String> permissions) => engine.store.write((db) {
-      db.execute("DELETE FROM grants WHERE account = ?", [account]);
-      for (final permission in permissions) {
-        db.execute("INSERT INTO grants (account, permission) VALUES (?, ?)", [account, permission]);
-      }
-    });
-
     /// [login] signed in again on a new connection (the master's app), so its grants are re-read.
     Future<RpcClient> again(String login) async {
       final client = await master.connect();
@@ -359,24 +352,30 @@ void main() {
         ErrorCodes.forbidden);
     });
 
-    test('the view without view_personal: no private fields, and no pay or person edits (E-3, E-12)', () async {
+    test('employees is the hr key: an assignment shares it from the assigner, taking it away unwraps it (P-9, E-3)', () async {
       final (id, _) = await hire("grace@example.com");
       final (_, viewerClient) = await hire("viewer@example.com");
       await edit(id, {"SALARY": "700", "CITY": "Maracay"});
-
-      final viewerAccount = engine.store.db.select("SELECT id FROM accounts WHERE username = 'viewer'").first["id"] as String;
-      grant(viewerAccount, ["business.view", "business.employees.view", "business.employees.invite"]);
       await viewerClient.close();
+      final viewerAccount = engine.store.db.select("SELECT id FROM accounts WHERE username = 'viewer'").first["id"] as String;
+
+      await write(Ops.permissionsMembersAssign, {
+        "username": "viewer",
+        "permissions": {"employees": {"access": true, "manage": true}},
+      });
       final viewer = await again("viewer");
 
       final seen = await detail(id, viewer);
-      expect(seen["fullProfile"], isFalse);
-      expect(seen["person"], isNot(contains("city")));
-      expect(seen["job"], isNot(contains("salary")));
+      expect(seen["fullProfile"], isTrue);
+      expect((seen["person"] as Map)["city"], "Maracay");
+      await edit(id, {"SALARY": "900"}, as: viewer);
 
-      await edit(id, {"DEPARTMENT": "Bar"}, as: viewer);
-      await expectRefusal(edit(id, {"SALARY": "900"}, as: viewer), ErrorCodes.forbidden);
-      await expectRefusal(edit(id, {"CITY": "Valencia"}, as: viewer), ErrorCodes.forbidden);
+      await write(Ops.permissionsMembersAssign, {"username": "viewer", "permissions": {"employees": {"access": false}}});
+
+      expect(engine.store.db.select("SELECT 1 FROM sealed_keys WHERE scope = 'hr' AND holder = ?", [viewerAccount]), isEmpty);
+      // The open session checks the new permissions from its next frame (P-8).
+      await expectRefusal(detail(id, viewer), ErrorCodes.notFound);
+      await expectRefusal(edit(id, {"DEPARTMENT": "Bar"}, as: viewer), ErrorCodes.forbidden);
     });
   });
 }

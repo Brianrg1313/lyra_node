@@ -26,14 +26,16 @@ void main() {
     client.call(op, args: args, commandId: commandId ?? const Uuid().v7());
 
   group('session.bootstrap', () {
-    test('answers the one company, the owner\'s grants, the catalogues and the deployment (S-30 to S-33)', () async {
+    test('answers the one company, the owner\'s permissions, the catalogues and the deployment (S-30 to S-34)', () async {
       final answer = await client.call(Ops.sessionBootstrap) as Map<String, Object?>;
       final businesses = answer["businesses"] as List;
       final company = businesses.single as Map;
 
       expect(company["name"], "Lovelace Café");
       expect(company["currency"], "USD");
-      expect(answer["permissions"], {company["id"]: ["*"]});
+      // The cloud's `/init` shape (S-34): every area the owner opens, nested.
+      expect(answer["permissions"], {company["id"]: Grant.everything().tree});
+      expect(answer["owned"], [company["id"]]);
       expect(answer["tasks"], isEmpty);
       expect((answer["client"] as Map)["username"], "ada.owner");
       expect((answer["client"] as Map)["lastName"], "Lovelace");
@@ -105,10 +107,7 @@ void main() {
 
     test('only the owner creates it', () async {
       final account = ownerTokens["accountId"] as String;
-      bare.openEngine.store.write((db) {
-        db.execute("DELETE FROM grants WHERE account = ?", [account]);
-        db.execute("INSERT INTO grants (account, permission) VALUES (?, 'business.view')", [account]);
-      });
+      grantKeys(bare.openEngine, account, ["business"]);
       final (reader, _) = await bare.signIn();
 
       await expectRefusal(create(reader, draft), ErrorCodes.forbidden);
@@ -152,10 +151,7 @@ void main() {
       await expectRefusal(link(client, ""), ErrorCodes.invalidField);
 
       final account = tokens["accountId"] as String;
-      master.openEngine.store.write((db) {
-        db.execute("DELETE FROM grants WHERE account = ?", [account]);
-        db.execute("INSERT INTO grants (account, permission) VALUES (?, 'business.view')", [account]);
-      });
+      grantKeys(master.openEngine, account, ["business"]);
       final (reader, _) = await master.signIn();
 
       await expectRefusal(link(reader, "6650f1c2a9e4b8d3f0a1b2c3"), ErrorCodes.forbidden);
@@ -237,10 +233,7 @@ void main() {
       final engine = master.openEngine;
       final owner = tokens["accountId"] as String;
 
-      engine.store.write((db) {
-        db.execute("DELETE FROM grants WHERE account = ?", [owner]);
-        db.execute("INSERT INTO grants (account, permission) VALUES (?, 'business.view')", [owner]);
-      });
+      grantKeys(engine, owner, ["business"]);
       final (reader, _) = await master.signIn();
 
       expect(await reader.call(Ops.businessProfile), isA<Map>());
@@ -310,7 +303,8 @@ void main() {
 
       final rows = master.openEngine.store.db.select("SELECT id, referenced, permission FROM files ORDER BY id");
       expect({for (final row in rows) row["id"]: row["referenced"]}, {first: 0, second: 1});
-      expect(rows.last["permission"], "business.view");
+      // Every member reads the logo, as every member sees it in the cloud's company list.
+      expect(rows.last["permission"], isNull);
       expect((await write(Ops.businessSetLogo, {"fileId": null}) as Map)["logo"], isNull);
     });
 

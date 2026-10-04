@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:lyra_node/lyra_node.dart';
+import 'package:lyra_protocol/lyra_protocol.dart' show PermissionCatalog;
 
 /// Argon2id cheap enough for tests. Production uses [Argon2Params.standard].
 const fastParams = Argon2Params(memory: 1024, iterations: 1, parallelism: 1);
@@ -48,3 +49,11 @@ Future<({String instanceId, RecoveryKey recovery, EnrolledDevice? device})> setU
   hasher: fastHasher,
   now: now,
 );
+
+/// Gives [account] exactly [keys] (catalog keys, `session.md` P-1), as an assignment would. The
+/// owner is `all` by measurement (S-6), so restricting the owner first forgets who it is: the
+/// tests that check a refusal do it on the account they already have.
+void grantKeys(Engine engine, String account, List<String> keys) => engine.store.write((db) {
+  db.execute("DELETE FROM meta WHERE key = 'owner' AND value = ?", [account]);
+  Grants.write(db, account, sections: PermissionCatalog.fromKeys(keys), now: DateTime.now());
+});
