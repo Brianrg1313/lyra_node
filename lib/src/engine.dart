@@ -35,6 +35,8 @@ import 'oplog/oplog.dart';
 import 'process/paths.dart';
 import 'storage/migrations.dart';
 import 'storage/store.dart';
+import 'sync/edge_sync.dart';
+import 'sync/entities.dart';
 
 /// This engine's version, answered in `hello` (`protocol-v1.md` §4).
 const String engineVersion = "0.2.0";
@@ -162,6 +164,20 @@ final class Engine {
   late final Accounting accounting = Accounting(store, business, finance, files, now: _now);
 
   late final Employees employees = Employees(store, clock, business, accounts, sealed, now: _now);
+
+  /// The edge sync with the cloud (plan §9): one instance for the engine's life, the runner's loop
+  /// and the ops share it. Its key pair is sealed with a key of its own purpose.
+  late final EdgeSync edge = EdgeSync(
+    store,
+    clock,
+    instance: instanceId,
+    sealKey: () => _keyring.derive("lyra/edge/key/v1"),
+    now: _now,
+    entities: [
+      CompanyEdge(_now), SiteEdge(_now), ProductTableEdge(_now), ProductFieldEdge(_now), ProductEdge(_now),
+      const CurrencyEdge(), StockMovementEdge(stock), const PaymentEdge(), const AccountEdge(),
+    ],
+  );
 
   /// The keys of the sealed fields each session opened (plan §6.3): one instance for the engine's
   /// life, like [sessions].

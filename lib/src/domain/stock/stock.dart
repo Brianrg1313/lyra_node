@@ -27,6 +27,10 @@ final class Stock {
   static const audience = [Inventory.viewPermission, "pos.view"];
 
   static const maxQuantity = 1000000;
+
+  /// The `source` of a movement the cloud made (plan §9.3): like a replayed outbox's, it already
+  /// happened, so it is never refused for the balance; a negative one is flagged instead.
+  static const cloudSource = "cloud";
   static const _maxSummaryPage = 200;
   static const _maxHistoryPage = 100;
 
@@ -98,7 +102,7 @@ final class Stock {
         StockOperations.add => returns < 0,
         _ => false,
       };
-      final replayed = source == "outbox";
+      final replayed = source == "outbox" || source == cloudSource;
 
       if (negative && !replayed) {
         throw EngineFailure("insufficient_stock", {

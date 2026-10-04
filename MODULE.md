@@ -3,7 +3,7 @@
 **Path** `E:/andromeda/frontend/packages/lyra_node` (own git repo, pure Dart, no Flutter)
 **Role** The engine that runs on the master (`lyra/app/docs/plan-offline-lan.md` §3, §8): one company, encrypted,
 one writer. Phase 2 built storage, keys, oplog, identities, audit and the process lifecycle; phase 3 the LAN server
-(TLS, pairing, RPC, events, files, mDNS); phase 4 adds the domains one per release (business, inventory and stock, import, POS, sales, finance with its accounts and the accounting export, employees so far). Rules come from `lyra/app/docs/offline/specs/*`, never from backend code (plan principle 1).
+(TLS, pairing, RPC, events, files, mDNS); phase 4 adds the domains one per release (business, inventory and stock, import, POS, sales, finance with its accounts and the accounting export, employees so far); phase 6 the edge sync with the cloud (`lyra/app/docs/task-edge-sync-backend.md`). Rules come from `lyra/app/docs/offline/specs/*`, never from backend code (plan principle 1).
 **Used by** `lyra/app` through the executable only (`LocalServerService`), never as a Dart import.
 
 ## Files
@@ -13,7 +13,7 @@ one writer. Phase 2 built storage, keys, oplog, identities, audit and the proces
 - `lib/lyra_node.dart` — barrel (for `bin/` and tests).
 - `lib/src/engine.dart` — `Engine` (`setup` with the owner and, optionally, the company, `open`, `recover`, `close`, `controlKey`,
   `enrollMaster`, `prepareTransport`; holds `sessions`, `events`, `authority`, `files`, `business`, `inventory`,
-  `stock`, `pos`, `sales`, `finance`, `methods`, `accounting`, `employees`, `sealed`), `OwnerDraft`,
+  `stock`, `pos`, `sales`, `finance`, `methods`, `accounting`, `employees`, `sealed`, `edge`), `OwnerDraft`,
   `DeviceDraft`, `EnrolledDevice`,
   `engineVersion`, `minAppVersion`.
 - `lib/src/failure.dart` — `EngineFailure` (a rule's refusal: stable `code` + `data`, no message).
@@ -55,6 +55,8 @@ one writer. Phase 2 built storage, keys, oplog, identities, audit and the proces
 - `lib/src/storage/migrations/m009_employees.dart` — `employments`, `sealed_fields` (one sealed value per row, to `hr`
   and to the person), `activations` (a pending account's code, hashed).
 - `lib/src/storage/migrations/m010_cloud_link.dart` — `company.cloud_id` (the cloud company it is one with).
+- `lib/src/storage/migrations/m011_sync.dart` — `sync_link` (the enrolment, cursors), `sync_ids` (cloud ↔ local),
+  `sync_fields` (each synced field's stamp), `sync_pulled`, `sync_rejected`, `sync_conflicts` (the inbox).
 - `lib/src/domain/employees/employees.dart` — `Employees` (`list` shaped by permission, `former`, `detail` with the
   E-4 measures and the sealed fields of `hr` or one's own, `invite` with a pending account and its code,
   `reissueActivation`, `accept`, `acceptInvitations`, `draftEdit` / `draftOwn` checked and sealed before `save`),
@@ -123,11 +125,20 @@ one writer. Phase 2 built storage, keys, oplog, identities, audit and the proces
 - `lib/src/net/web_bundle.dart` — `WebBundle` (static web build, CSP, `marker` written into its HTML).
 - `lib/src/net/discovery.dart` — `MdnsResponder` (`_lyra._tcp.local`; the master's `alias` only to a question about it),
   `LanName` (the `.local` name browsers open: from the company's name, `claim`ed against the LAN's answers).
+- `lib/src/sync/edge.dart` — the wire: `EdgeChange`, `EdgeOps`, `EdgeRequest` / `EdgeResponse`, `EdgeTransport`,
+  `EdgeFailure`, `EdgeSigner` (Ed25519 request signatures), `HttpEdgeTransport`.
+- `lib/src/sync/edge_sync.dart` — `EdgeSync` (`prepare` the key, `enroll`, `cycle`: download, upload, push, pull;
+  field stamps, the conflicts inbox `conflicts` / `resolve`, `status`), `EdgeEnrolment`, `EdgeAllowance`, `SyncPhase`,
+  `SyncReport`.
+- `lib/src/sync/entities.dart` — `EdgeEntity` (one entity of the edge vocabulary on the engine's tables: `read`,
+  `touched` by an oplog entry, `apply` a pulled change) and its kinds: `CompanyEdge`, `SiteEdge`, `ProductTableEdge`,
+  `ProductFieldEdge`, `ProductEdge`, `StockMovementEdge`, `PaymentEdge`, `CurrencyEdge`, `AccountEdge`; `edgeOrigin`.
 - `lib/src/process/paths.dart` — `NodePaths` (data folder per OS and its files).
 - `lib/src/process/lock.dart` — `InstanceLock` (exclusive OS lock, one engine per folder).
 - `lib/src/process/control.dart` — `EngineStatusFile` (`engine.state.json`, HMAC-signed), `EnginePhase`, `ControlChannel`
   (signed stop requests in `control/`).
-- `lib/src/process/runner.dart` — `NodeRunner` (lock → state → unlock → wait for stop), `ExitCodes`.
+- `lib/src/process/runner.dart` — `NodeRunner` (lock → state → unlock → wait for stop; the edge sync every `syncEvery`),
+  `ExitCodes`.
 - `lib/src/process/status.dart` — `readStatus`, `stopEngine`, `NodeStatus` (the app's side, run through the CLI).
 - `lib/src/process/engine_log.dart` — `EngineLog` (`logs/engine.log`, rotated; no secrets, no company data).
 - `test/support.dart` — fast Argon2 params, temp data folders, `setUpMaster`.
@@ -157,6 +168,10 @@ one writer. Phase 2 built storage, keys, oplog, identities, audit and the proces
 - `test/import_test.dart` — importing: `.csv` / `.xlsx` reading, the typing rules, both steps over the LAN with their
   events and opening balances, normalizing, limits.
 - `test/discovery_test.dart` — mDNS answers (and a live lookup, tag `network`).
+- `test/support/edge_cloud.dart` — `EdgeCloud`: the backend's half of the edge contract in memory (signatures, id map,
+  field stamps, no echo, allowance), and the cloud app's edits.
+- `test/sync_test.dart` — the edge sync against `EdgeCloud`: enrolment, the first link both ways, live push and pull,
+  facts, the same field on both sides and the inbox, deletes, retries, refusals, revocation, the allowance, the clock.
 - `test/process_test.dart` — the built executable with the real vault (Windows only, tag `process`).
 - `test/browser_e2e_test.dart` — the app's LAN web build in a headless Chrome over DevTools: pairs by code, key in
   IndexedDB, signs in, reloads (`device.prove`), revoked (tag `browser`, needs `LYRA_WEB`).
@@ -182,6 +197,10 @@ one writer. Phase 2 built storage, keys, oplog, identities, audit and the proces
   (`Authority.browser`) may go into an OS trust store. Both have one key and name, so every issued certificate
   chains to both.
 - `engine.unlock` and `pairing.start` are accepted only from the master device named in `transport.json`.
+- A change pulled from the cloud is written with the oplog `device` `edgeOrigin`: the push skips those entries (no
+  echo) and the field stamps take the cloud's. A new synced entity is an `EdgeEntity` in `Engine.edge` and a row of
+  the vocabulary in `task-edge-sync-backend.md` §11, in the same change; a local write it misses (no oplog entry, as
+  a template's fields) must come back from `touched` of the entry that did it, or the cloud never hears of it.
 
 ## Commands
 

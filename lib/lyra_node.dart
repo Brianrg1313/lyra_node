@@ -52,3 +52,6 @@ export 'src/process/runner.dart';
 export 'src/process/status.dart';
 export 'src/storage/migrations.dart';
 export 'src/storage/store.dart';
+export 'src/sync/edge.dart';
+export 'src/sync/edge_sync.dart';
+export 'src/sync/entities.dart';

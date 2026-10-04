@@ -10,6 +10,7 @@ import '../failure.dart';
 import '../net/discovery.dart';
 import '../net/server.dart';
 import '../net/tls.dart';
+import '../sync/edge.dart';
 import 'control.dart';
 import 'engine_log.dart';
 import 'lock.dart';
@@ -42,7 +43,11 @@ final class NodeRunner {
     this.port = defaultPort,
     this.webRoot,
     this.discoverable = true,
+    this.syncEvery = const Duration(minutes: 1),
   }) : log = EngineLog(paths.logs);
+
+  /// How often a linked master syncs with the cloud (plan §9.1).
+  final Duration syncEvery;
 
   /// The LAN port; 0 picks a free one (tests).
   final int port;
@@ -217,6 +222,32 @@ final class NodeRunner {
         log.info("engine ready");
       }
 
+      // The edge sync (plan §9.1): the engine dials out while it is enrolled, app open or not.
+      HttpEdgeTransport? edgeTransport;
+      Future<void>? syncing;
+
+      Future<void> sync() async {
+        final current = server?.engine ?? engine;
+        final endpoint = current?.edge.endpoint;
+        if (current == null || endpoint == null) return;
+
+        if (edgeTransport?.endpoint != endpoint) {
+          edgeTransport?.close();
+          edgeTransport = HttpEdgeTransport(endpoint);
+        }
+
+        final report = await current.edge.cycle(edgeTransport!);
+        if (report.error != null) log.error("sync: ${report.error}");
+      }
+
+      void tick() {
+        if (syncing != null) return;
+        syncing = sync().catchError((Object error) => log.error("sync failed: $error")).whenComplete(() => syncing = null);
+      }
+
+      final syncer = Timer.periodic(syncEvery, (_) => tick());
+      tick();
+
       if (keyrings.mode == UnlockMode.passphrase && engine == null) {
         final secret = await passphrase?.call();
 
@@ -232,6 +263,10 @@ final class NodeRunner {
 
       await stop.future;
       poller.cancel();
+      syncer.cancel();
+      // A cycle in flight finishes its write before the database closes.
+      await syncing?.timeout(const Duration(seconds: 30), onTimeout: () {});
+      edgeTransport?.close();
 
       publish(EnginePhase.stopping);
       await mdns?.stop();
