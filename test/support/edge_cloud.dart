@@ -46,18 +46,21 @@ final class EdgeCloud implements EdgeTransport {
   // ------------------------------------------------------------------------- enrolment
 
   /// `POST /edge/v1/devices`, the app's call with the owner's session.
-  EdgeEnrolment enroll(String instance, String publicKey) {
+  EdgeEnrolment enroll(String instance, String publicKey) => EdgeEnrolment.fromJson(register(instance, publicKey));
+
+  /// [enroll]'s answer as the backend sends it, which the app hands to `sync.enroll`.
+  Map<String, Object?> register(String instance, String publicKey) {
     final id = "d-${++_next}";
     _devices[id] = (instance: instance, key: base64.decode(publicKey), revoked: false, from: _log.length);
 
-    return EdgeEnrolment.fromJson({
+    return {
       "device": id,
       "company": company,
       "site": site,
       "edgeKey": {"kid": "2026-10", "publicKey": edgeKey},
       "allowance": allowance,
       "endpoint": "https://cloud.test$base",
-    });
+    };
   }
 
   void revoke(String device) {

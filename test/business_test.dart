@@ -8,6 +8,7 @@ import 'package:test/test.dart';
 import 'package:uuid/uuid.dart';
 
 import 'net_support.dart';
+import 'support/edge_cloud.dart';
 
 /// The business domain over the LAN (`business.md`, `session.md` session.bootstrap): the one
 /// company and site, their edits and events, the logo, the catalogues. Rule numbers name what
@@ -111,6 +112,52 @@ void main() {
       final (reader, _) = await bare.signIn();
 
       await expectRefusal(create(reader, draft), ErrorCodes.forbidden);
+    });
+  });
+
+  group('sync', () {
+    Future<Object?> prepare(RpcClient client) => client.call(Ops.syncPrepare, commandId: const Uuid().v7());
+
+    test("the owner enrols the linked master with the backend's answer, audited (B-33 to B-35)", () async {
+      final cloud = EdgeCloud();
+      await write(Ops.businessLink, {"cloudId": cloud.company});
+      expect(await client.call(Ops.syncStatus), {"enrolled": false});
+
+      final key = await prepare(client) as Map;
+      expect((await prepare(client) as Map)["publicKey"], key["publicKey"]);
+      expect(key["instance"], master.openEngine.instanceId);
+      expect(key["engine"], engineVersion);
+      expect(key["name"], isNotEmpty);
+
+      final answer = cloud.register(key["instance"] as String, key["publicKey"] as String);
+      final status = await write(Ops.syncEnroll, answer) as Map;
+      expect(status["enrolled"], isTrue);
+      expect(status["device"], answer["device"]);
+      expect(await client.call(Ops.syncStatus), status);
+
+      final entry = master.openEngine.audit.list().singleWhere((entry) => entry.kind == AuditKinds.syncEnrolled);
+      expect(entry.data["device"], answer["device"]);
+    });
+
+    test("an answer that isn't one, or for another company, enrols nothing (B-34)", () async {
+      final cloud = EdgeCloud();
+      await write(Ops.businessLink, {"cloudId": cloud.company});
+      final key = await prepare(client) as Map;
+      final answer = cloud.register(key["instance"] as String, key["publicKey"] as String);
+
+      await expectRefusal(write(Ops.syncEnroll, {...answer, "endpoint": "http://cloud.test/edge/v1"}), ErrorCodes.invalidField);
+      await expectRefusal(write(Ops.syncEnroll, {...answer, "company": "another"}), "company_mismatch");
+      expect(await client.call(Ops.syncStatus), {"enrolled": false});
+    });
+
+    test("only the owner prepares and enrols; the server's people read the status", () async {
+      final account = tokens["accountId"] as String;
+      grantKeys(master.openEngine, account, ["server"]);
+      final (reader, _) = await master.signIn();
+
+      await expectRefusal(prepare(reader), ErrorCodes.forbidden);
+      await expectRefusal(reader.call(Ops.syncEnroll, args: const {}, commandId: const Uuid().v7()), ErrorCodes.forbidden);
+      expect(await reader.call(Ops.syncStatus), {"enrolled": false});
     });
   });
 

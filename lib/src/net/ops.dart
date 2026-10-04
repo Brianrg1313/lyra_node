@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io' show Platform;
 
 import 'package:crypto/crypto.dart' show sha1;
 import 'package:lyra_protocol/lyra_protocol.dart';
@@ -13,6 +14,7 @@ import '../domain/business/business.dart';
 import '../domain/inventory/inventory.dart';
 import '../domain/inventory/spreadsheet.dart';
 import '../domain/sales/sales.dart';
+import '../sync/edge_sync.dart';
 import 'files.dart';
 import 'rpc.dart';
 
@@ -50,6 +52,10 @@ final Map<String, OpRule> opRules = {
   Ops.businessLink.name: const OpRule(_link),
   Ops.businessSiteGet.name: const OpRule(_site, permission: _businessView),
   Ops.businessSiteEdit.name: const OpRule(_editSite, permission: _businessEdit),
+  // The owner's alone, which the handlers check, as the backend's enrolment is (B-33).
+  Ops.syncPrepare.name: const OpRule(_prepareSync),
+  Ops.syncEnroll.name: const OpRule(_enrollSync),
+  Ops.syncStatus.name: const OpRule(_syncStatus, permission: _serverView),
   Ops.inventoryTablesList.name: const OpRule(_tables, permission: _inventoryView),
   Ops.inventoryTablesCreate.name: const OpRule(_createTable, permission: _productsStructure),
   Ops.inventoryTablesEdit.name: const OpRule(_editTable, permission: _productsStructure),
@@ -148,6 +154,9 @@ const _viewPersonal = _employeesView;
 
 /// The master's own section (`session.md` P-4), area `local_server`.
 const _devicesPermission = "server.devices";
+
+/// Whoever opens that section, which shows the sync with the cloud (B-35).
+const _serverView = "server";
 
 /// Whether the session's person can [key] (`session.md` P-1).
 bool _allows(OpCall call, String key) => call.connection.grant.can(key);
@@ -492,6 +501,41 @@ Future<Object?> _site(OpCall call) async => call.engine.business.site();
 /// `business.site.edit {changed keys}` (B-10 to B-12).
 Future<Object?> _editSite(OpCall call) async => call.write(() =>
   call.engine.business.editSite(call.args, actor: call.session.accountId, device: call.device.id));
+
+/// `sync.prepare` (B-33): the edge key the app registers with the backend, and what the
+/// enrolment names this master by. The same key until `sync.enroll` takes it.
+Future<Object?> _prepareSync(OpCall call) async {
+  if (!_isOwner(call)) throw const EngineFailure(ErrorCodes.forbidden);
+
+  final publicKey = await call.engine.edge.prepare();
+  final host = Platform.localHostname.trim();
+
+  return call.write(() => {
+    "publicKey": publicKey,
+    "instance": call.engine.instanceId,
+    "engine": engineVersion,
+    "name": host.isEmpty ? call.engine.business.profile(owner: true)["name"] : (host.length > 64 ? host.substring(0, 64) : host),
+  });
+}
+
+/// `sync.enroll {device, company, site, edgeKey, allowance, endpoint}` (B-33, B-34): the backend's
+/// answer to the enrolment, as it came. Answers `sync.status`.
+Future<Object?> _enrollSync(OpCall call) async {
+  if (!_isOwner(call)) throw const EngineFailure(ErrorCodes.forbidden);
+
+  final enrolment = EdgeEnrolment.fromJson(call.args);
+
+  return call.write(() {
+    call.engine.edge.enroll(enrolment);
+    call.engine.audit.append(AuditKinds.syncEnrolled, actor: call.session.accountId, device: call.device.id,
+      data: {"device": enrolment.device, "company": enrolment.company, "site": enrolment.site});
+
+    return call.engine.edge.status();
+  });
+}
+
+/// `sync.status` (B-35): where the sync with the cloud stands.
+Future<Object?> _syncStatus(OpCall call) async => call.engine.edge.status();
 
 // ---------------------------------------------------------------- inventory (`inventory.md`)
 

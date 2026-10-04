@@ -157,7 +157,7 @@ one writer. Phase 2 built storage, keys, oplog, identities, audit and the proces
 - `test/crypto_test.dart`, `keyring_test.dart`, `storage_test.dart`, `oplog_test.dart`, `engine_test.dart` — units.
 - `test/net_test.dart` — the LAN server with real TLS clients: handshake, pairing, man in the middle, revocation,
   sessions, passphrase mode, browsers (the page marked as a master's), events, files.
-- `test/business_test.dart` — the business domain over the LAN: bootstrap, profile edits and their refusals, the cloud link, idempotence,
+- `test/business_test.dart` — the business domain over the LAN: bootstrap, profile edits and their refusals, the cloud link, the sync ops (prepare, enroll, status), idempotence,
   `business/changed`, permissions, the site's point, the logo, `catalog.get` (rule numbers in the names).
 - `test/inventory_test.dart` — inventory and stock over the LAN: tables, templates and the primary flag, fields and
   positions, cells and SKUs, search, images and thumbnails, movements, holds, replays, events, history, summary.
@@ -180,7 +180,7 @@ one writer. Phase 2 built storage, keys, oplog, identities, audit and the proces
 - `test/import_test.dart` — importing: `.csv` / `.xlsx` reading, the typing rules, both steps over the LAN with their
   events and opening balances, normalizing, limits.
 - `test/discovery_test.dart` — mDNS answers (and a live lookup, tag `network`).
-- `test/support/edge_cloud.dart` — `EdgeCloud`: the backend's half of the edge contract in memory (signatures, id map,
+- `test/support/edge_cloud.dart` — `EdgeCloud`: the backend's half of the edge contract in memory (`register` the enrolment as sent, signatures, id map,
   field stamps, no echo, allowance), and the cloud app's edits.
 - `test/sync_test.dart` — the edge sync against `EdgeCloud`: enrolment, the first link both ways, live push and pull,
   facts, the same field on both sides and the inbox, deletes, retries, refusals, revocation, the allowance, the clock.
