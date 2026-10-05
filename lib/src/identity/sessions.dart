@@ -191,6 +191,13 @@ final class Sessions {
   /// Drops the access tokens of [deviceId] (after its revocation committed).
   void forgetDevice(String deviceId) => _access.removeWhere((_, grant) => grant.deviceId == deviceId);
 
+  /// The account of the open session [refreshToken] refreshes on [deviceId], without rotating it:
+  /// what `auth.unseal` checks the password of before it rotates (S-13). Null otherwise.
+  String? accountOfRefresh(String refreshToken, {required String deviceId}) => _db.select(
+    "SELECT account FROM sessions WHERE refresh_hash = ? AND device = ? AND ended IS NULL AND refresh_expires > ?",
+    [_hash(refreshToken), deviceId, _now().toUtc().toIso8601String()],
+  ).firstOrNull?["account"] as String?;
+
   /// The account [sessionId] belongs to, or null when there is no such session.
   String? accountOf(String sessionId) =>
     _db.select("SELECT account FROM sessions WHERE id = ?", [sessionId]).firstOrNull?["account"] as String?;

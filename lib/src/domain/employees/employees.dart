@@ -225,6 +225,8 @@ final class Employees {
       "contractStatus": _contractStatus(row, today),
       "workStatus": _workStatus(row, today),
       "fullProfile": full,
+      // Would be whole, but the session holds no key: one a cloud grant opened (`session.md` S-13).
+      "sealedLocked": !full && ((viewer.personal && viewer.hrKey == null) || (self && viewer.own == null)),
       "profileEditable": state == "active",
       "person": {
         "username": person["username"],

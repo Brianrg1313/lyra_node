@@ -34,6 +34,8 @@ final Map<String, OpRule> opRules = {
   Ops.authIdentify.name: const OpRule(_identify, gate: Gate.device),
   Ops.authSignIn.name: const OpRule(_signIn, gate: Gate.device),
   Ops.authActivate.name: const OpRule(_activate, gate: Gate.device),
+  Ops.authGrant.name: const OpRule(_grant, gate: Gate.device),
+  Ops.authUnseal.name: const OpRule(_unseal, gate: Gate.device),
   Ops.authRefresh.name: const OpRule(_refresh, gate: Gate.device),
   Ops.authSignOut.name: const OpRule(_signOut),
   Ops.accountChangePassword.name: const OpRule(_changePassword),
@@ -320,6 +322,42 @@ Future<Object?> _activate(OpCall call) async {
     sessionId: tokens.sessionId, refreshToken: tokens.refreshToken);
 
   return {...tokens.toJson(), "accountId": account.id, "mustChangePassword": false};
+}
+
+/// `auth.grant {grant}` (S-12): a session opened by the backend's signed statement instead of a
+/// password, checked offline. It holds no sealed keys until `auth.unseal` (S-13).
+Future<Object?> _grant(OpCall call) async {
+  final engine = call.engine;
+  final device = call.device;
+
+  if (!call.connection.server.allowSignIn(device.id)) throw const EngineFailure(ErrorCodes.rateLimited, {"retryAfter": 60});
+
+  final account = await engine.cloudGrants.redeem(call.text("grant", max: 4096), engine.accounts);
+  final tokens = engine.sessions.open(accountId: account.id, deviceId: device.id);
+
+  return {...tokens.toJson(), "accountId": account.id, "mustChangePassword": account.mustChangePassword, "sealed": false};
+}
+
+/// `auth.unseal {refreshToken, password}` (S-13): the password of the session [refreshToken]
+/// refreshes opens its sealed keys, under a rotated token. A wrong one counts as a sign in's (S-4).
+Future<Object?> _unseal(OpCall call) async {
+  final engine = call.engine;
+  final device = call.device;
+
+  if (!call.connection.server.allowSignIn(device.id)) throw const EngineFailure(ErrorCodes.rateLimited, {"retryAfter": 60});
+
+  final previous = call.text("refreshToken");
+  final password = call.text("password", max: 1024);
+  final owner = engine.sessions.accountOfRefresh(previous, deviceId: device.id);
+  final known = owner == null ? null : engine.accounts.byId(owner);
+  if (known == null) throw const EngineFailure(ErrorCodes.sessionExpired);
+
+  final account = await engine.accounts.verifyPassword(known.username, password, device: device.id);
+  final tokens = engine.sessions.refresh(previous, deviceId: device.id);
+
+  await engine.sealed.signedIn(account, password, sessionId: tokens.sessionId, refreshToken: tokens.refreshToken);
+
+  return tokens.toJson();
 }
 
 /// `auth.refresh {refreshToken}` (S-21).

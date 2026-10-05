@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:cryptography/cryptography.dart';
 import 'package:lyra_node/lyra_node.dart';
 
 /// The backend's half of the edge sync, in memory: `lyra/app/docs/task-edge-sync-backend.md`
@@ -32,8 +33,11 @@ final class EdgeCloud implements EdgeTransport {
   final _log = <({int seq, Map<String, Object?> change, String? origin})>[];
   var _next = 0;
 
-  /// The edge key's public half, as the enrolment answers it.
-  static final edgeKey = base64.encode(List.filled(32, 7));
+  /// The edge key's public half, as the enrolment answers it: the Ed25519 key of [edgeSeed].
+  static const edgeKey = "6kpsY+KcUgq+9VB7Ey7F+ZVHdq6+vnuSQh7qaRRG0iw=";
+
+  /// The edge key's private seed, which signs the grants (§9).
+  static final edgeSeed = List.filled(32, 7);
 
   static const _refs = {
     "product_field": {"table": "product_table"},
@@ -66,6 +70,28 @@ final class EdgeCloud implements EdgeTransport {
   void revoke(String device) {
     final current = _devices[device]!;
     _devices[device] = (instance: current.instance, key: current.key, revoked: true, from: current.from);
+  }
+
+  /// `POST /edge/v1/grants` (§9): a grant for [email] on [device], signed as the backend signs it.
+  /// [payload] overrides the statement's keys, to forge or age one; [seed] signs with another key.
+  Future<String> grant(String device, String email, {DateTime? now, Map<String, Object?> payload = const {},
+      List<int>? seed}) async {
+    final issued = (now ?? DateTime.now()).millisecondsSinceEpoch ~/ 1000;
+    final bytes = utf8.encode(jsonEncode({
+      "v": 1,
+      "kid": "2026-10",
+      "device": device,
+      "company": company,
+      "account": {"id": "u-1", "email": email},
+      "nonce": "${++_next}".padLeft(22, "n"),
+      "iat": issued,
+      "exp": issued + 120,
+      ...payload,
+    }));
+    final signature = await Ed25519().sign(bytes, keyPair: await Ed25519().newKeyPairFromSeed(seed ?? edgeSeed));
+    String part(List<int> value) => base64Url.encode(value).replaceAll("=", "");
+
+    return "${part(bytes)}.${part(signature.bytes)}";
   }
 
   // ------------------------------------------------------------------- the cloud app

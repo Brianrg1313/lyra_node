@@ -13,7 +13,7 @@ one writer. Phase 2 built storage, keys, oplog, identities, audit and the proces
 - `lib/lyra_node.dart` — barrel (for `bin/` and tests).
 - `lib/src/engine.dart` — `Engine` (`setup` with the owner and, optionally, the company, `open`, `recover`, `close`, `controlKey`,
   `enrollMaster`, `prepareTransport`; holds `sessions`, `events`, `authority`, `files`, `business`, `inventory`,
-  `stock`, `pos`, `sales`, `finance`, `methods`, `accounting`, `employees`, `deliveries`, `sealed`, `edge`), `OwnerDraft`,
+  `stock`, `pos`, `sales`, `finance`, `methods`, `accounting`, `employees`, `deliveries`, `sealed`, `cloudGrants`, `edge`), `OwnerDraft`,
   `DeviceDraft`, `EnrolledDevice`,
   `engineVersion`, `minAppVersion`.
 - `lib/src/failure.dart` — `EngineFailure` (a rule's refusal: stable `code` + `data`, no message).
@@ -64,6 +64,7 @@ one writer. Phase 2 built storage, keys, oplog, identities, audit and the proces
 - `lib/src/storage/migrations/m014_owner_job.dart` — the owner's `active` job where the company was created without it.
 - `lib/src/storage/migrations/m015_deliveries.dart` — the delivery settings on `company`, `delivery_options`, `delivery_areas`
   (money in minor units, metres, millionths; `deleted`).
+- `lib/src/storage/migrations/m016_cloud_grants.dart` — `grant_nonces`: a cloud grant's nonce until it expired (one use).
 - `lib/src/domain/deliveries/deliveries.dart` — `Deliveries` (`settings`, `set`, `providers`, options and areas created, edited
   checked whole, removed): `deliveries.md`.
 - `lib/src/domain/deliveries/carriers.dart` — `Carriers` (the cloud's carriers per country as of 2026-09: `offered`, `pick`, `name`).
@@ -114,7 +115,9 @@ one writer. Phase 2 built storage, keys, oplog, identities, audit and the proces
   decoy for a login that can't sign in) + `pairingFailed`), `Account`, `AccountStatus`, `PasswordPairingAccount`.
 - `lib/src/identity/devices.dart` — `Devices` (`enroll`, `rename`, `revoke`, `touch`, `byFingerprint`, `master`, `codeFor`),
   `Device`, `DeviceKind` (`master`, `native`, `web`).
-- `lib/src/identity/sessions.dart` — `Sessions` (access tokens in memory, rotated refresh tokens, reuse ends the session),
+- `lib/src/identity/cloud_grants.dart` — `CloudGrants` (`redeem`: the backend's signed grant checked offline against the
+  pinned edge keys, this master's device and company, its window, its nonce once; the account by e-mail): `session.md` S-12.
+- `lib/src/identity/sessions.dart` — `Sessions` (access tokens in memory, rotated refresh tokens, reuse ends the session, `accountOfRefresh`),
   `SessionTokens`, `SessionGrant`, `SessionScope`.
 - `lib/src/identity/grants.dart` — `Grants` (a person's `Grant` with the owner measured, `read`, `hasAccess`, `admit`,
   `revoke`, `write` normalized, `makeOwner`; `cloudOwned`, `cloudIdOf`, `fromCloud`: P-12), `MemberRow`, `TemplateRef`:

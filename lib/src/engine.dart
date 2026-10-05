@@ -23,6 +23,7 @@ import 'domain/sales/sales.dart';
 import 'domain/stock/stock.dart';
 import 'failure.dart';
 import 'identity/accounts.dart';
+import 'identity/cloud_grants.dart';
 import 'identity/devices.dart';
 import 'identity/grants.dart';
 import 'identity/passwords.dart';
@@ -149,6 +150,9 @@ final class Engine {
   CommandLedger get commands => CommandLedger(store.db);
 
   late final Accounts accounts = Accounts(store, clock, hasher: _hasher, now: _now);
+
+  /// The cloud grants a session opens with instead of a password (`session.md` S-12).
+  CloudGrants get cloudGrants => CloudGrants(store, now: _now);
 
   late final Business business = Business(store, clock, now: _now);
 
