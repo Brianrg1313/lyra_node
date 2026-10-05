@@ -226,6 +226,44 @@ void main() {
     });
   });
 
+  group('deliveries', () {
+    test("the settings ride on the company; options and areas go up, the cloud's come down, deletes both ways", () async {
+      final option = (engine.deliveries.createOption({"provider": "zoom", "fee": 500, "etaMin": 60}, actor: owner)
+        ["options"] as List).single as Map;
+      await enroll();
+      await cycle();
+
+      final cloudOption = cloud.cloudIdOf(device, "delivery_option", option["id"] as String)!;
+      expect(cloud.record("delivery_option", cloudOption)!.fields, containsPair("provider", "zoom"));
+      expect(cloud.record("delivery_option", cloudOption)!.fields, containsPair("coverage", "national"));
+
+      engine.deliveries.set({"pickup": true, "meeting": true}, actor: owner);
+      final area = (engine.deliveries.createArea({"name": "Centro", "kind": "polygon",
+        "polygon": [[10.5, -66.9], [10.5, -66.8], [10.4, -66.8]]}, actor: owner)["areas"] as List).single as Map;
+      expect((await cycle()).pushed, 2);
+      expect(cloud.record("company", cloud.company)!.fields, allOf(containsPair("pickup", true), containsPair("meetingPoint", true)));
+      final cloudArea = cloud.cloudIdOf(device, "delivery_area", area["id"] as String)!;
+      expect(cloud.record("delivery_area", cloudArea)!.fields["polygon"], [[10500000, -66900000], [10500000, -66800000], [10400000, -66800000]]);
+
+      await later();
+      cloud.edit("delivery_option", cloudOption, fields: {"fee": 650, "zones": null});
+      cloud.edit("company", cloud.company, fields: {"deliveryNotes": "Hasta las 6"});
+      cloud.create("delivery_area", {"name": "Este", "kind": "radius", "latitude": 10480000, "longitude": -66870000,
+        "radius": 3000, "active": true, "position": 100});
+      cloud.delete("delivery_area", cloudArea);
+      await cycle();
+
+      final settings = engine.deliveries.settings();
+      expect(settings, allOf(containsPair("notes", "Hasta las 6"), containsPair("pickup", true)));
+      expect((settings["options"] as List).single, allOf(containsPair("fee", 650), containsPair("etaMin", 60)));
+      expect([for (final row in (engine.deliveries.areas()["areas"] as List).cast<Map>()) row["name"]], ["Este"]);
+
+      engine.deliveries.removeOption(option["id"], actor: owner);
+      await cycle();
+      expect(cloud.record("delivery_option", cloudOption)!.deleted, isTrue);
+    });
+  });
+
   group('the same field on both sides', () {
     late ({String table, Map<String, String> fields}) food;
     late String rice;

@@ -3,7 +3,7 @@
 **Path** `E:/andromeda/frontend/packages/lyra_node` (own git repo, pure Dart, no Flutter)
 **Role** The engine that runs on the master (`lyra/app/docs/plan-offline-lan.md` §3, §8): one company, encrypted,
 one writer. Phase 2 built storage, keys, oplog, identities, audit and the process lifecycle; phase 3 the LAN server
-(TLS, pairing, RPC, events, files, mDNS); phase 4 adds the domains one per release (business, inventory and stock, import, POS, sales, finance with its accounts and the accounting export, employees so far); phase 6 the edge sync with the cloud (`lyra/app/docs/task-edge-sync-backend.md`). Rules come from `lyra/app/docs/offline/specs/*`, never from backend code (plan principle 1).
+(TLS, pairing, RPC, events, files, mDNS); phase 4 adds the domains one per release (business, inventory and stock, import, POS, sales, finance with its accounts and the accounting export, employees, deliveries for `hybrid` so far); phase 6 the edge sync with the cloud (`lyra/app/docs/task-edge-sync-backend.md`). Rules come from `lyra/app/docs/offline/specs/*`, never from backend code (plan principle 1).
 **Used by** `lyra/app` through the executable only (`LocalServerService`), never as a Dart import.
 
 ## Files
@@ -13,7 +13,7 @@ one writer. Phase 2 built storage, keys, oplog, identities, audit and the proces
 - `lib/lyra_node.dart` — barrel (for `bin/` and tests).
 - `lib/src/engine.dart` — `Engine` (`setup` with the owner and, optionally, the company, `open`, `recover`, `close`, `controlKey`,
   `enrollMaster`, `prepareTransport`; holds `sessions`, `events`, `authority`, `files`, `business`, `inventory`,
-  `stock`, `pos`, `sales`, `finance`, `methods`, `accounting`, `employees`, `sealed`, `edge`), `OwnerDraft`,
+  `stock`, `pos`, `sales`, `finance`, `methods`, `accounting`, `employees`, `deliveries`, `sealed`, `edge`), `OwnerDraft`,
   `DeviceDraft`, `EnrolledDevice`,
   `engineVersion`, `minAppVersion`.
 - `lib/src/failure.dart` — `EngineFailure` (a rule's refusal: stable `code` + `data`, no message).
@@ -62,6 +62,11 @@ one writer. Phase 2 built storage, keys, oplog, identities, audit and the proces
 - `lib/src/storage/migrations/m013_cloud_members.dart` — `sync_members`: the cloud's document per person (the edge
   `member`), by cloud account id, with the e-mail it is found by.
 - `lib/src/storage/migrations/m014_owner_job.dart` — the owner's `active` job where the company was created without it.
+- `lib/src/storage/migrations/m015_deliveries.dart` — the delivery settings on `company`, `delivery_options`, `delivery_areas`
+  (money in minor units, metres, millionths; `deleted`).
+- `lib/src/domain/deliveries/deliveries.dart` — `Deliveries` (`settings`, `set`, `providers`, options and areas created, edited
+  checked whole, removed): `deliveries.md`.
+- `lib/src/domain/deliveries/carriers.dart` — `Carriers` (the cloud's carriers per country as of 2026-09: `offered`, `pick`, `name`).
 - `lib/src/domain/permissions/permissions.dart` — `Permissions`: the cloud's `Members`, `Templates` and `Requests` (`get`,
   `templates` + create/edit/remove, `members`, `member`, `assign`, `revoke`, `requests`, `request`, `accountOf`):
   `session.md` session.permissions.
@@ -142,7 +147,8 @@ one writer. Phase 2 built storage, keys, oplog, identities, audit and the proces
   `SyncReport`.
 - `lib/src/sync/entities.dart` — `EdgeEntity` (one entity of the edge vocabulary on the engine's tables: `read`,
   `touched` by an oplog entry, `apply` a pulled change) and its kinds: `CompanyEdge`, `SiteEdge`, `ProductTableEdge`,
-  `ProductFieldEdge`, `ProductEdge`, `StockMovementEdge`, `PaymentEdge`, `CurrencyEdge`, `AccountEdge` (with the person's
+  `ProductFieldEdge`, `ProductEdge`, `StockMovementEdge`, `PaymentEdge`, `CurrencyEdge`, `DeliveryOptionEdge`,
+  `DeliveryAreaEdge`, `AccountEdge` (with the person's
   permissions, upload only), `MemberEdge` (the cloud's permissions, pull only); `edgeOrigin`.
 - `lib/src/process/paths.dart` — `NodePaths` (data folder per OS and its files).
 - `lib/src/process/lock.dart` — `InstanceLock` (exclusive OS lock, one engine per folder).
@@ -180,11 +186,14 @@ one writer. Phase 2 built storage, keys, oplog, identities, audit and the proces
   downloaded over the LAN and read back, the window, refusals, the audit, the file only its asker reads for an hour.
 - `test/import_test.dart` — importing: `.csv` / `.xlsx` reading, the typing rules, both steps over the LAN with their
   events and opening balances, normalizing, limits.
+- `test/deliveries_test.dart` — deliveries over the LAN: the three-state settings, carriers per country deciding the mode,
+  the reach and its zones, edits checked whole, circles and outlines, pausing, the limits, the cloud's keys per op.
 - `test/discovery_test.dart` — mDNS answers (and a live lookup, tag `network`).
 - `test/support/edge_cloud.dart` — `EdgeCloud`: the backend's half of the edge contract in memory (`register` the enrolment as sent, signatures, id map,
   field stamps, no echo, allowance), and the cloud app's edits.
 - `test/sync_test.dart` — the edge sync against `EdgeCloud`: enrolment, the first link both ways, live push and pull,
-  facts, the same field on both sides and the inbox, deletes, retries, refusals, revocation, the allowance, the clock.
+  facts, deliveries (the settings on the company), the same field on both sides and the inbox, deletes, retries, refusals,
+  revocation, the allowance, the clock.
 - `test/sync_permissions_test.dart` — permissions on a master that syncs: the first upload carries them, the cloud's
   `member` counts (by id map or e-mail, the owner kept, a delete takes access), kept for someone admitted later, the
   master's editor refused (`permissions_online`) until revoked or past the allowance.

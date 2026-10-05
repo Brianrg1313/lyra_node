@@ -129,6 +129,16 @@ final Map<String, OpRule> opRules = {
   Ops.permissionsMembersRevoke.name: const OpRule(_revoke, permission: _assignKey),
   Ops.permissionsRequestsList.name: const OpRule(_requests),
   Ops.permissionsRequestsCreate.name: const OpRule(_request),
+  Ops.deliveryGet.name: const OpRule(_delivery, permission: _deliveryView),
+  Ops.deliverySet.name: const OpRule(_setDelivery, permission: _deliveryEdit),
+  Ops.deliveryProviders.name: const OpRule(_deliveryProviders, permission: _deliveryView),
+  Ops.deliveryOptionsCreate.name: const OpRule(_createDeliveryOption, permission: _deliveryCreate),
+  Ops.deliveryOptionsEdit.name: const OpRule(_editDeliveryOption, permission: _deliveryEdit),
+  Ops.deliveryOptionsRemove.name: const OpRule(_removeDeliveryOption, permission: _deliveryDelete),
+  Ops.deliveryAreasList.name: const OpRule(_deliveryAreas, permission: _deliveryView),
+  Ops.deliveryAreasCreate.name: const OpRule(_createDeliveryArea, permission: _deliveryCreate),
+  Ops.deliveryAreasEdit.name: const OpRule(_editDeliveryArea, permission: _deliveryEdit),
+  Ops.deliveryAreasRemove.name: const OpRule(_removeDeliveryArea, permission: _deliveryDelete),
 };
 
 // The catalog's keys (`session.md` P-4): each op takes the one its cloud route takes.
@@ -147,6 +157,10 @@ const _manageEmployees = "employees.manage";
 const _permissionsView = "permissions";
 const _templatesEdit = "permissions.templates";
 const _assignKey = "permissions.assign";
+const _deliveryView = "delivery";
+const _deliveryCreate = "delivery.create";
+const _deliveryEdit = "delivery.edit";
+const _deliveryDelete = "delivery.delete";
 
 /// The cloud has no employee permission for personal data: whoever reads the staff reads it
 /// (`session.md` P-9).
@@ -1088,6 +1102,37 @@ Future<Object?> _requests(OpCall call) async => call.engine.permissions.requests
 
 Future<Object?> _request(OpCall call) async =>
   call.write(() => call.engine.permissions.request(call.args, account: call.session.accountId));
+
+/// `delivery.get` (`deliveries.md`).
+Future<Object?> _delivery(OpCall call) async => call.engine.deliveries.settings();
+
+/// `delivery.set {delivers?, pickup?, meeting?, notes?}` (D-1).
+Future<Object?> _setDelivery(OpCall call) async =>
+  call.write(() => call.engine.deliveries.set(call.args, actor: call.session.accountId, device: call.device.id));
+
+/// `delivery.providers` (D-2): the carriers of the company's country.
+Future<Object?> _deliveryProviders(OpCall call) async => call.engine.deliveries.providers();
+
+Future<Object?> _createDeliveryOption(OpCall call) async =>
+  call.write(() => call.engine.deliveries.createOption(call.args, actor: call.session.accountId, device: call.device.id));
+
+Future<Object?> _editDeliveryOption(OpCall call) async =>
+  call.write(() => call.engine.deliveries.editOption(call.args, actor: call.session.accountId, device: call.device.id));
+
+Future<Object?> _removeDeliveryOption(OpCall call) async =>
+  call.write(() => call.engine.deliveries.removeOption(call.args["id"], actor: call.session.accountId, device: call.device.id));
+
+Future<Object?> _deliveryAreas(OpCall call) async => call.engine.deliveries.areas();
+
+Future<Object?> _createDeliveryArea(OpCall call) async =>
+  call.write(() => call.engine.deliveries.createArea(call.args, actor: call.session.accountId, device: call.device.id));
+
+/// `delivery.areas.edit {id, …}`, or `{id, active}` alone (D-13).
+Future<Object?> _editDeliveryArea(OpCall call) async =>
+  call.write(() => call.engine.deliveries.editArea(call.args, actor: call.session.accountId, device: call.device.id));
+
+Future<Object?> _removeDeliveryArea(OpCall call) async =>
+  call.write(() => call.engine.deliveries.removeArea(call.args["id"], actor: call.session.accountId, device: call.device.id));
 
 /// `page` ≥ 1 and `size` from 1 to [max].
 (int, int) _paging(OpCall call, int max, int fallback) {

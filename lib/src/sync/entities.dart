@@ -235,6 +235,9 @@ final class CompanyEdge extends _ColumnEntity {
     "country": EdgeColumn("country"), "language": EdgeColumn("language"), "currency": EdgeColumn("currency"),
     "phone": EdgeColumn("phone"), "website": EdgeColumn("website"), "incorporationDate": EdgeColumn("incorporation_date"),
     "timezone": EdgeColumn("timezone"),
+    // The delivery settings live on the company, on both sides (`deliveries.md`).
+    "delivers": EdgeColumn("delivers", EdgeKind.boolean), "pickup": EdgeColumn("pickup", EdgeKind.boolean),
+    "meetingPoint": EdgeColumn("meeting_point", EdgeKind.boolean), "deliveryNotes": EdgeColumn("delivery_notes"),
   };
 
   @override
@@ -250,7 +253,7 @@ final class CompanyEdge extends _ColumnEntity {
     if (write.created || write.op != EdgeOps.upsert) throw const EngineFailure("unknown_company");
 
     final values = sql(write);
-    for (final column in const ["name", "country", "language", "currency"]) {
+    for (final column in const ["name", "country", "language", "currency", "meeting_point"]) {
       if (values.containsKey(column) && values[column] == null) EdgeEntity.invalid(column);
     }
 
@@ -854,6 +857,122 @@ final class CurrencyEdge extends _ColumnEntity {
 
     return write.id;
   }
+}
+
+// ----------------------------------------------------------------------------- deliveries
+
+/// A delivery option or area (`deliveries.md`): one row per record, removed by `deleted`.
+abstract base class _DeliveryEdge extends _ColumnEntity {
+  const _DeliveryEdge();
+
+  /// The fields a record made here from the cloud must have.
+  @override
+  Set<String> get required;
+
+  @override
+  List<EdgeTouch> touched(Database db, OplogEntry entry) => switch (entry.kind) {
+    "created" => [EdgeTouch(name, entry.entityId, EdgeOps.upsert)],
+    "edited" when known(entry.payload.keys).isNotEmpty =>
+      [EdgeTouch(name, entry.entityId, EdgeOps.upsert, fields: known(entry.payload.keys))],
+    "removed" => [EdgeTouch(name, entry.entityId, EdgeOps.delete)],
+    _ => const [],
+  };
+
+  @override
+  String apply(Database db, EdgeWrite write) {
+    if (write.op == EdgeOps.delete) {
+      if (!write.created) {
+        db.execute("UPDATE $sqlTable SET deleted = 1, updated_hlc = ? WHERE id = ?", [write.stamp.pack(), write.id]);
+        log(db, write, "removed");
+      }
+
+      return write.id;
+    }
+
+    final values = sql(write);
+    for (final field in required) {
+      if (values.containsKey(columns[field]!.name) && values[columns[field]!.name] == null) EdgeEntity.invalid(field);
+    }
+
+    if (write.created) {
+      checkRequired(values);
+      final row = {
+        "id": write.id,
+        ...values,
+        "created": _instant(write.now),
+        "created_hlc": write.stamp.pack(),
+        "updated_hlc": write.stamp.pack(),
+      };
+      db.execute(
+        "INSERT INTO $sqlTable (${row.keys.join(", ")}) VALUES (${row.keys.map((_) => "?").join(", ")})",
+        row.values.toList(),
+      );
+      log(db, write, "created", write.fields);
+    } else {
+      // An upsert newer than a delete brings the record back (§5).
+      final restored = db.select("SELECT deleted FROM $sqlTable WHERE id = ?", [write.id]).firstOrNull?["deleted"] == 1;
+      if (values.isEmpty && !restored) return write.id;
+
+      update(db, write, {...values, if (restored) "deleted": 0});
+      log(db, write, "edited", write.fields);
+    }
+
+    return write.id;
+  }
+}
+
+/// A way the company delivers: `zones` as `[{name, fee}]`, money in minor units, `radius` in metres.
+final class DeliveryOptionEdge extends _DeliveryEdge {
+  const DeliveryOptionEdge();
+
+  @override
+  String get name => "delivery_option";
+
+  @override
+  String get local => "delivery_option";
+
+  @override
+  String get sqlTable => "delivery_options";
+
+  @override
+  Map<String, EdgeColumn> get columns => const {
+    "mode": EdgeColumn("mode"), "provider": EdgeColumn("provider"), "label": EdgeColumn("label"),
+    "coverage": EdgeColumn("coverage"), "radius": EdgeColumn("radius", EdgeKind.integer),
+    "zones": EdgeColumn("zones", EdgeKind.json), "fee": EdgeColumn("fee", EdgeKind.integer),
+    "freeFrom": EdgeColumn("free_from", EdgeKind.integer), "etaMin": EdgeColumn("eta_min", EdgeKind.integer),
+    "etaMax": EdgeColumn("eta_max", EdgeKind.integer), "notes": EdgeColumn("notes"),
+    "position": EdgeColumn("position", EdgeKind.integer),
+  };
+
+  @override
+  Set<String> get required => const {"mode", "coverage", "position"};
+}
+
+/// An area drawn on the map: a point in millionths of a degree, `polygon` as `[[latitude,
+/// longitude]]` in millionths, `radius` in metres.
+final class DeliveryAreaEdge extends _DeliveryEdge {
+  const DeliveryAreaEdge();
+
+  @override
+  String get name => "delivery_area";
+
+  @override
+  String get local => "delivery_area";
+
+  @override
+  String get sqlTable => "delivery_areas";
+
+  @override
+  Map<String, EdgeColumn> get columns => const {
+    "name": EdgeColumn("name"), "kind": EdgeColumn("kind"), "latitude": EdgeColumn("latitude", EdgeKind.integer),
+    "longitude": EdgeColumn("longitude", EdgeKind.integer), "radius": EdgeColumn("radius", EdgeKind.integer),
+    "polygon": EdgeColumn("polygon", EdgeKind.json), "fee": EdgeColumn("fee", EdgeKind.integer),
+    "minimum": EdgeColumn("minimum", EdgeKind.integer), "active": EdgeColumn("active", EdgeKind.boolean),
+    "position": EdgeColumn("position", EdgeKind.integer),
+  };
+
+  @override
+  Set<String> get required => const {"name", "kind", "active", "position"};
 }
 
 /// The master's people, sent once at the first link so the cloud makes their accounts (D10). They

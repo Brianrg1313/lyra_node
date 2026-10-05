@@ -11,6 +11,7 @@ import 'crypto/sealed.dart';
 import 'crypto/secrets.dart';
 import 'crypto/vault.dart';
 import 'domain/business/business.dart';
+import 'domain/deliveries/deliveries.dart';
 import 'domain/employees/employees.dart';
 import 'domain/export/accounting.dart';
 import 'domain/inventory/inventory.dart';
@@ -169,6 +170,8 @@ final class Engine {
 
   late final Permissions permissions = Permissions(store, now: _now);
 
+  late final Deliveries deliveries = Deliveries(store, clock, business, now: _now);
+
   /// The edge sync with the cloud (plan §9): one instance for the engine's life, the runner's loop
   /// and the ops share it. Its key pair is sealed with a key of its own purpose.
   late final EdgeSync edge = EdgeSync(
@@ -179,7 +182,8 @@ final class Engine {
     now: _now,
     entities: [
       CompanyEdge(_now), SiteEdge(_now), ProductTableEdge(_now), ProductFieldEdge(_now), ProductEdge(_now),
-      const CurrencyEdge(), StockMovementEdge(stock), const PaymentEdge(), const AccountEdge(), MemberEdge(_now, _pulledGrants.add),
+      const CurrencyEdge(), StockMovementEdge(stock), const PaymentEdge(), const DeliveryOptionEdge(), const DeliveryAreaEdge(),
+      const AccountEdge(), MemberEdge(_now, _pulledGrants.add),
     ],
   );
 

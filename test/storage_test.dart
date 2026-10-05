@@ -182,7 +182,7 @@ void main() {
           "VALUES ('e1', 'g', 'active', 'Barista', 't', 'h', 'h')");
       });
 
-      expect(migrate(store, backups: paths.backups), [14]);
+      expect(migrate(store, backups: paths.backups, steps: migrations.where((m) => m.version <= 14).toList()), [14]);
 
       final job = store.db.select("SELECT * FROM employments WHERE account = 'a'").single;
       expect(job["id"], matches(RegExp(r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")));
