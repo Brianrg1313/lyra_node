@@ -165,6 +165,31 @@ void main() {
       expect(versions, [for (var i = 1; i <= versions.length; i++) i], reason: "numbered 1, 2, 3… with no gaps");
     });
 
+    test('14 files the owner\'s job where the company was made without it, once', () {
+      final store = Store.open(paths.database, key(1));
+      addTearDown(store.close);
+      migrate(store, backups: paths.backups, steps: migrations.where((m) => m.version < 14).toList());
+
+      store.write((db) {
+        for (final (id, name) in [("a", "ada"), ("g", "grace")]) {
+          db.execute("INSERT INTO accounts (id, username, first_name, last_name, status, created, created_hlc, "
+            "updated_hlc) VALUES (?, ?, 'N', 'L', 'active', 't', 'h', 'h')", [id, name]);
+        }
+        db.execute("INSERT INTO meta (key, value) VALUES ('owner', 'a')");
+        db.execute("INSERT INTO company (id, name, country, currency, language, created, created_hlc, updated_hlc) "
+          "VALUES ('c', 'Café', 'VE', 'USD', 'en', '2026-03-02T10:00:00.000Z', 'hc', 'hc')");
+        db.execute("INSERT INTO employments (id, account, state, job_title, invited, created_hlc, updated_hlc) "
+          "VALUES ('e1', 'g', 'active', 'Barista', 't', 'h', 'h')");
+      });
+
+      expect(migrate(store, backups: paths.backups), [14]);
+
+      final job = store.db.select("SELECT * FROM employments WHERE account = 'a'").single;
+      expect(job["id"], matches(RegExp(r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")));
+      expect((job["state"], job["job_title"], job["start_date"], job["created_hlc"]), ("active", "Owner", "2026-03-02", "hc"));
+      expect(store.db.select("SELECT 1 FROM employments"), hasLength(2), reason: "nobody else's job is touched");
+    });
+
     test('12 turns the grants into members: the * row is the owner, a job admits, stored area ids become keys', () {
       final store = Store.open(paths.database, key(1));
       addTearDown(store.close);

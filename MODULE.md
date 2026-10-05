@@ -61,6 +61,7 @@ one writer. Phase 2 built storage, keys, oplog, identities, audit and the proces
   `permission_requests`, `meta.owner`; `grants` dropped, stored area ids on files and events made catalog keys.
 - `lib/src/storage/migrations/m013_cloud_members.dart` — `sync_members`: the cloud's document per person (the edge
   `member`), by cloud account id, with the e-mail it is found by.
+- `lib/src/storage/migrations/m014_owner_job.dart` — the owner's `active` job where the company was created without it.
 - `lib/src/domain/permissions/permissions.dart` — `Permissions`: the cloud's `Members`, `Templates` and `Requests` (`get`,
   `templates` + create/edit/remove, `members`, `member`, `assign`, `revoke`, `requests`, `request`, `accountOf`):
   `session.md` session.permissions.

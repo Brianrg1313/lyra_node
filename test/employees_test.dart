@@ -90,7 +90,7 @@ void main() {
       expect(replay["activation"], isNull);
     });
 
-    test('the list: the owner\'s unfiled card first, then the invitation with its e-mail (E-1)', () async {
+    test('the list: the owner\'s own job first, then the invitation with its e-mail (E-1, B-1)', () async {
       await invite({"email": "zoe@example.com", "jobTitle": "Cook", "firstName": "Zoe", "lastName": "Zed"});
       await invite({"username": "bob.b", "jobTitle": "Cashier", "firstName": "Bob"});
 
@@ -98,12 +98,22 @@ void main() {
       final cards = (answer["employees"] as List).cast<Map>();
 
       expect([for (final card in cards) card["username"]], ["ada.owner", "bob.b", "zoe"]);
-      expect(cards.first["id"], isNull);
+      expect(cards.first["id"], isNotNull, reason: "creating the company filed the owner's job, as the cloud does");
       expect(cards.first["me"], isTrue);
+      expect((cards.first["state"], cards.first["workStatus"], cards.first["startDate"]), ("active", "working", today()));
       expect(cards[2]["email"], "zoe@example.com");
       expect(cards[2]["state"], "invited");
       expect(cards[2]["branchId"], engine.business.site()["id"]);
-      expect(answer["total"], 0, reason: "only active ones count");
+      expect(answer["total"], 1, reason: "only active ones count: the owner");
+    });
+
+    test('a viewer with no job here gets an unfiled card (E-1)', () async {
+      engine.store.write((db) => db.execute("DELETE FROM employments"));
+
+      final cards = ((await list())["employees"] as List).cast<Map>();
+
+      expect(cards.single["id"], isNull);
+      expect(cards.single["me"], isTrue);
     });
 
     test('already invited, already employed (E-10)', () async {

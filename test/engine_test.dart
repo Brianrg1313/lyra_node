@@ -48,7 +48,7 @@ void main() {
         AuditKinds.engineStart,
       ]);
       expect(engine.audit.verify(), isNull);
-      expect(engine.oplog.since(0).map((entry) => entry.entity), ["account", "company"]);
+      expect(engine.oplog.since(0).map((entry) => entry.entity), ["account", "company", "employment"]);
       expect(engine.oplog.since(0).first.payload, isNot(contains("password")));
       expect(engine.business.profile(owner: true), containsPair("name", "Lovelace Café"));
       expect(engine.business.site(), containsPair("name", "Lovelace Café"));

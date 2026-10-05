@@ -125,6 +125,40 @@ final class Business {
       "name": name,
       "cloudId": ?cloudId,
     });
+
+    if (actor != null) {
+      _fileOwner(db, actor, draft, stamp: clock.tick(), now: now,
+        today: Zones.local(_zoneOf(timezone, draft.country), now).substring(0, 10));
+    }
+  }
+
+  /// The owner's job title in the company's [language], as the cloud's `Vocabulary.ownerTitles`.
+  static const ownerTitles = {"es": "Dueño", "en": "Owner", "pt": "Proprietário"};
+
+  static String ownerTitle(String language) =>
+    ownerTitles[language.trim().toLowerCase().split("-").first] ?? ownerTitles["es"]!;
+
+  /// Files the creator's job: `active` from the company's [today], titled [ownerTitle], as the
+  /// cloud's `Business.fileOwner` does. Without it their own list showed them as "no job filed".
+  static void _fileOwner(Database db, String account, CompanyDraft draft, {required Hlc stamp, required DateTime now, required String today}) {
+    final id = newId();
+    final at = now.toUtc().toIso8601String();
+    final title = ownerTitle(draft.language);
+
+    db.execute(
+      "INSERT INTO employments (id, account, state, job_title, start_date, invited, invited_by, responded, created_hlc, updated_hlc) "
+      "VALUES (?, ?, 'active', ?, ?, ?, ?, ?, ?, ?)",
+      [id, account, title, today, at, account, at, stamp.pack(), stamp.pack()],
+    );
+    Oplog(db).append(hlc: stamp, entity: "employment", entityId: id, kind: "created",
+      payload: {"account": account, "state": "active", "jobTitle": title}, actor: account);
+  }
+
+  /// A [stored] zone the database knows, or else [country]'s default one (B-9).
+  static String _zoneOf(String? stored, String country) {
+    if (stored != null && stored.isNotEmpty && Zones.known(stored)) return stored;
+
+    return Catalogs.country(country.trim().toUpperCase())?["timezone"] as String? ?? "UTC";
   }
 
   bool get exists => _db.select("SELECT 1 FROM company WHERE deleted = 0").isNotEmpty;
@@ -152,10 +186,8 @@ final class Business {
   /// the country's, so "today" never fails.
   String get timezone {
     final row = _company;
-    final stored = row["timezone"] as String?;
-    if (stored != null && Zones.known(stored)) return stored;
 
-    return Catalogs.country(row["country"] as String)?["timezone"] as String? ?? "UTC";
+    return _zoneOf(row["timezone"] as String?, row["country"] as String);
   }
 
   /// The cloud company this one is linked to (B-30), null while it isn't.
