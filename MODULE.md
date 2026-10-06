@@ -65,6 +65,7 @@ one writer. Phase 2 built storage, keys, oplog, identities, audit and the proces
 - `lib/src/storage/migrations/m015_deliveries.dart` — the delivery settings on `company`, `delivery_options`, `delivery_areas`
   (money in minor units, metres, millionths; `deleted`).
 - `lib/src/storage/migrations/m016_cloud_grants.dart` — `grant_nonces`: a cloud grant's nonce until it expired (one use).
+- `lib/src/storage/migrations/m017_sync_uploaded.dart` — `sync_link.uploaded`: the entities whose records a link uploaded.
 - `lib/src/domain/deliveries/deliveries.dart` — `Deliveries` (`settings`, `set`, `providers`, options and areas created, edited
   checked whole, removed): `deliveries.md`.
 - `lib/src/domain/deliveries/carriers.dart` — `Carriers` (the cloud's carriers per country as of 2026-09: `offered`, `pick`, `name`).
@@ -147,12 +148,14 @@ one writer. Phase 2 built storage, keys, oplog, identities, audit and the proces
   `EdgeFailure`, `EdgeSigner` (Ed25519 request signatures), `HttpEdgeTransport`.
 - `lib/src/sync/edge_sync.dart` — `EdgeSync` (`prepare` the key, `enroll`, `cycle`: download, upload, push, pull;
   field stamps, the conflicts inbox `conflicts` / `resolve`, `status`), `EdgeEnrolment`, `EdgeAllowance`, `SyncPhase`,
-  `SyncReport`.
+  `SyncReport`. A live link uploads once the records of an entity a later version added (`sync_link.uploaded`).
 - `lib/src/sync/entities.dart` — `EdgeEntity` (one entity of the edge vocabulary on the engine's tables: `read`,
   `touched` by an oplog entry, `apply` a pulled change) and its kinds: `CompanyEdge`, `SiteEdge`, `ProductTableEdge`,
   `ProductFieldEdge`, `ProductEdge`, `StockMovementEdge`, `PaymentEdge`, `CurrencyEdge`, `DeliveryOptionEdge`,
   `DeliveryAreaEdge`, `AccountEdge` (with the person's
-  permissions, upload only), `MemberEdge` (the cloud's permissions, pull only); `edgeOrigin`.
+  permissions, upload only), `MemberEdge` (the cloud's permissions, pull only), `EmployeeEdge` (a job and its person's
+  e-mail, no sealed field; state forward only; opens a `pending` account for a job the cloud filed, activates it when the
+  cloud says the job started); `edgeOrigin`.
 - `lib/src/process/paths.dart` — `NodePaths` (data folder per OS and its files).
 - `lib/src/process/lock.dart` — `InstanceLock` (exclusive OS lock, one engine per folder).
 - `lib/src/process/control.dart` — `EngineStatusFile` (`engine.state.json`, HMAC-signed), `EnginePhase`, `ControlChannel`
@@ -201,6 +204,9 @@ one writer. Phase 2 built storage, keys, oplog, identities, audit and the proces
 - `test/sync_permissions_test.dart` — permissions on a master that syncs: the first upload carries them, the cloud's
   `member` counts (by id map or e-mail, the owner kept, a delete takes access), kept for someone admitted later, the
   master's editor and an invitation's template refused (`permissions_online`) until revoked or past the allowance.
+- `test/sync_employees_test.dart` — jobs on a master that syncs: an invitation reaches the cloud, accepted there it starts
+  here and opens the account, a job filed in the cloud makes its account, state forward only, the owner's job kept one,
+  a link from before `employee` uploads the jobs it had, once.
 - `test/process_test.dart` — the built executable with the real vault (Windows only, tag `process`).
 - `test/browser_e2e_test.dart` — the app's LAN web build in a headless Chrome over DevTools: pairs by code, key in
   IndexedDB, signs in, reloads (`device.prove`), revoked (tag `browser`, needs `LYRA_WEB`).

@@ -8,6 +8,7 @@ import '../domain/business/business.dart';
 import '../domain/inventory/inventory.dart';
 import '../domain/stock/stock.dart';
 import '../failure.dart';
+import '../identity/accounts.dart';
 import '../identity/grants.dart';
 import '../net/events.dart';
 import '../oplog/hlc.dart';
@@ -1146,4 +1147,207 @@ final class MemberEdge extends EdgeEntity {
     (email == null
       ? null
       : db.select("SELECT id FROM accounts WHERE lower(email) = lower(?) AND deleted = 0", [email]).firstOrNull?["id"] as String?);
+}
+
+// ------------------------------------------------------------------------------ employees
+
+/// A job (`employees.md`, contract §11 `employee`): one employment and the person it is for, named
+/// by e-mail, as each side finds its own account for them. What brings a master's invitation to the
+/// person's cloud account, and their answer in the cloud back here.
+///
+/// The sealed fields (pay, notes, the private person) never travel (plan §6.3): the cloud keeps its
+/// own. Neither does `manager` yet. Names only make the account a side doesn't have yet: they are the
+/// account's, not the job's, and later changes to them aren't the job's to carry.
+///
+/// A job's `state` only moves forward (invited → active → ended / declined / cancelled), on both
+/// sides: a rehire is a new job, so an older state arriving late is dropped, never applied.
+final class EmployeeEdge extends EdgeEntity {
+  const EmployeeEdge(this.accounts, this.now);
+
+  final Accounts accounts;
+  final DateTime Function() now;
+
+  @override
+  String get name => "employee";
+
+  @override
+  String get local => "employment";
+
+  static const _columns = {
+    "jobTitle": "job_title", "department": "department", "code": "code", "contract": "contract", "workday": "workday",
+    "startDate": "start_date", "endDate": "end_date", "workEmail": "work_email", "workPhone": "work_phone",
+    "state": "state", "responded": "responded", "endedDate": "ended_date", "endReason": "end_reason", "endNote": "end_note",
+  };
+
+  static final _fields = {for (final MapEntry(:key, :value) in _columns.entries) value: key};
+
+  static const _states = {"invited": 0, "active": 1, "ended": 2, "declined": 2, "cancelled": 2};
+
+  static const _dates = {"startDate", "endDate", "endedDate"};
+
+  /// Only a person with an e-mail travels: it is how the cloud finds them (as `account`, §10).
+  @override
+  List<String> ids(Database db) => [
+    for (final row in db.select(
+      "SELECT e.id FROM employments e JOIN accounts a ON a.id = e.account WHERE a.email IS NOT NULL AND a.deleted = 0"))
+      row["id"] as String,
+  ];
+
+  @override
+  EdgeRow? read(Database db, String id) {
+    final row = db.select(
+      "SELECT e.*, a.email, a.first_name, a.last_name FROM employments e JOIN accounts a ON a.id = e.account WHERE e.id = ?",
+      [id],
+    ).firstOrNull;
+    if (row == null) return null;
+
+    return EdgeRow(
+      fields: {
+        "email": row["email"],
+        "firstName": row["first_name"],
+        "lastName": row["last_name"],
+        for (final MapEntry(key: field, value: column) in _columns.entries) field: row[column],
+      },
+      hlc: Hlc.parse(row["updated_hlc"] as String),
+    );
+  }
+
+  @override
+  List<EdgeTouch> touched(Database db, OplogEntry entry) {
+    final email = db.select(
+      "SELECT a.email FROM employments e JOIN accounts a ON a.id = e.account WHERE e.id = ?", [entry.entityId],
+    ).firstOrNull?["email"];
+    if (email == null) return const [];
+
+    return switch (entry.kind) {
+      "created" => [EdgeTouch(name, entry.entityId, EdgeOps.upsert)],
+      "accepted" => [EdgeTouch(name, entry.entityId, EdgeOps.upsert, fields: const {"state", "responded"})],
+      "edited" => [
+        if ({for (final key in entry.payload.keys) ?_fields[key]} case final fields when fields.isNotEmpty)
+          EdgeTouch(name, entry.entityId, EdgeOps.upsert, fields: fields),
+      ],
+      _ => const [],
+    };
+  }
+
+  @override
+  String apply(Database db, EdgeWrite write) {
+    if (write.op != EdgeOps.upsert) throw const EngineFailure("unsupported_op");
+
+    final values = _values(write.fields);
+
+    if (write.created) {
+      final email = write.fields["email"];
+      if (email is! String || !email.contains("@")) EdgeEntity.invalid("email");
+
+      final account = _account(db, email, write);
+      final adopted = _unmapped(db, account);
+
+      if (adopted != null) {
+        // The same job both sides filed before they were linked (the owner's, at the first link): the
+        // cloud's id is mapped onto it rather than filing it twice.
+        _update(db, adopted, account, values, write);
+
+        return adopted;
+      }
+
+      if (values["job_title"] == null) EdgeEntity.invalid("jobTitle");
+      final state = values["state"] as String? ?? "invited";
+
+      db.execute(
+        "INSERT INTO employments (id, account, state, job_title, department, code, contract, workday, start_date, end_date, "
+        "work_email, work_phone, invited, responded, ended_date, end_reason, end_note, created_hlc, updated_hlc, origin) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        [write.id, account, state, values["job_title"], values["department"], values["code"], values["contract"],
+          values["workday"], values["start_date"], values["end_date"], values["work_email"], values["work_phone"],
+          _instant(write.now), values["responded"], values["ended_date"], values["end_reason"], values["end_note"],
+          write.stamp.pack(), write.stamp.pack(), edgeOrigin],
+      );
+      log(db, write, "created", {"account": account, ...values});
+      if (state == "active") _started(db, account);
+
+      return write.id;
+    }
+
+    final row = db.select("SELECT account FROM employments WHERE id = ?", [write.id]).firstOrNull;
+    if (row == null) throw const EngineFailure(ErrorCodes.notFound);
+
+    _update(db, write.id, row["account"] as String, values, write);
+
+    return write.id;
+  }
+
+  /// The pulled fields as columns, checked. Names and the e-mail are the account's: left out.
+  Map<String, Object?> _values(Map<String, Object?> fields) {
+    final values = <String, Object?>{};
+
+    for (final MapEntry(key: field, value: value) in fields.entries) {
+      final column = _columns[field];
+      if (column == null) continue;
+      if (value != null && value is! String) EdgeEntity.invalid(field);
+
+      final text = value as String?;
+      final valid = switch (field) {
+        "jobTitle" => text != null && text.trim().isNotEmpty,
+        "state" => _states.containsKey(text),
+        "contract" => text == null || EmployeeFields.contracts.contains(text),
+        "workday" => text == null || EmployeeFields.workdays.contains(text),
+        _ when _dates.contains(field) => text == null || RegExp(r"^\d{4}-\d{2}-\d{2}$").hasMatch(text),
+        _ => true,
+      };
+      if (!valid) EdgeEntity.invalid(field);
+
+      values[column] = text;
+    }
+
+    return values;
+  }
+
+  /// Writes [values] on the job [id]; a state that doesn't move it forward is dropped.
+  void _update(Database db, String id, String account, Map<String, Object?> values, EdgeWrite write) {
+    final current = db.select("SELECT state FROM employments WHERE id = ?", [id]).first["state"] as String;
+    final changes = {...values};
+
+    if (changes["state"] case final String state when _states[state]! <= _states[current]!) changes.remove("state");
+    if (changes.isEmpty) return;
+
+    db.execute(
+      "UPDATE employments SET ${[...changes.keys.map((column) => "$column = ?"), "updated_hlc = ?"].join(", ")} WHERE id = ?",
+      [...changes.values, write.stamp.pack(), id],
+    );
+
+    final started = changes["state"] == "active";
+    Oplog(db).append(hlc: write.stamp, entity: local, entityId: id, kind: started ? "accepted" : "edited", payload: changes,
+      device: write.device, actor: write.actorAccount);
+    if (started) _started(db, account);
+  }
+
+  /// The local account the person is, by e-mail; one opened `pending` when they have none here, as
+  /// an invitation opens it (`employees.md` E-10), without a code: they answer in the cloud.
+  String _account(Database db, String email, EdgeWrite write) =>
+    db.select("SELECT id FROM accounts WHERE lower(email) = lower(?) AND deleted = 0", [email]).firstOrNull?["id"]
+      as String? ??
+    accounts.createPending(
+      email: email,
+      firstName: write.fields["firstName"] is String ? write.fields["firstName"]! as String : "",
+      lastName: write.fields["lastName"] is String ? write.fields["lastName"]! as String : "",
+      device: edgeOrigin,
+    );
+
+  /// The person's open job here that the cloud doesn't know yet, if any: at most one is open.
+  static String? _unmapped(Database db, String account) => db.select(
+    "SELECT e.id FROM employments e WHERE e.account = ? AND e.state IN ('invited', 'active') "
+    "AND NOT EXISTS (SELECT 1 FROM sync_ids s WHERE s.entity = 'employee' AND s.local_id = e.id)",
+    [account],
+  ).firstOrNull?["id"] as String?;
+
+  /// The person took the job in the cloud, which is the consent activating does here (`session.md`
+  /// S-8): a `pending` account becomes `active`, without a password, so the cloud's grant opens it
+  /// (S-12); and a job is membership (P-5).
+  void _started(Database db, String account) {
+    db.execute("UPDATE accounts SET status = ? WHERE id = ? AND status = ?",
+      [AccountStatus.active.name, account, AccountStatus.pending.name]);
+    db.execute("DELETE FROM activations WHERE account = ?", [account]);
+    Grants.admit(db, account, now: now());
+  }
 }

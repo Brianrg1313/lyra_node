@@ -287,6 +287,7 @@ final class EdgeSync {
 
       if (_link?["phase"] == SyncPhase.download) await _download(call, counts);
       if (_link?["phase"] == SyncPhase.upload) await _upload(call, counts);
+      if (_link?["phase"] == SyncPhase.live && _unuploaded.isNotEmpty) await _upload(call, counts, only: _unuploaded);
       await _push(call, counts);
       await _pull(call, counts);
 
@@ -340,7 +341,11 @@ final class EdgeSync {
   /// download brought is the cloud's already, unless it was edited here since; the company and the
   /// site go up whole either way. The oplog up to this moment is in that state, so the live push
   /// starts after it: nothing goes up twice.
-  Future<void> _upload(_Caller call, _Counts counts) async {
+  ///
+  /// With [only], a live master uploads the entities a later version added (`sync_link.uploaded`):
+  /// their records written before the update, which no oplog entry will ever carry. What the live
+  /// push sends of them afterwards finds them mapped.
+  Future<void> _upload(_Caller call, _Counts counts, {Set<String>? only}) async {
     final changes = <EdgeChange>[];
     var captured = 0;
 
@@ -350,6 +355,8 @@ final class EdgeSync {
       final ids = _Ids(db);
 
       for (final entity in _order) {
+        if (only != null && !only.contains(entity.name)) continue;
+
         for (final id in entity.ids(db)) {
           final mapped = entity.natural ? null : ids.cloud(entity.name, id);
           if (mapped != null && entity.name != "company" && entity.name != "site" && !_editedHere(db, entity.name, id)) continue;
@@ -390,8 +397,20 @@ final class EdgeSync {
       _store.write((db) => _settle(db, chunk, answer, counts));
     }
 
-    _store.write((db) => db.execute("UPDATE sync_link SET phase = ?, pushed_seq = max(pushed_seq, ?)", [SyncPhase.live, captured]));
+    final uploaded = jsonEncode(only == null ? [for (final entity in _order) entity.name] : [..._uploaded, ...only]);
+    _store.write((db) => only == null
+      ? db.execute("UPDATE sync_link SET phase = ?, pushed_seq = max(pushed_seq, ?), uploaded = ?", [SyncPhase.live, captured, uploaded])
+      : db.execute("UPDATE sync_link SET uploaded = ?", [uploaded]));
   }
+
+  /// What `sync_link.uploaded` lists; every entity while it lists nothing (a link from before it).
+  Set<String> get _uploaded => switch (_link?["uploaded"]) {
+    final String list => {for (final name in jsonDecode(list) as List) name as String},
+    _ => {for (final entity in _order) entity.name},
+  };
+
+  /// The entities a later version added, whose records here were never uploaded.
+  Set<String> get _unuploaded => {for (final entity in _order) if (!_uploaded.contains(entity.name)) entity.name};
 
   bool _editedHere(Database db, String entity, String id) =>
     db.select("SELECT 1 FROM sync_fields WHERE entity = ? AND entity_id = ? AND local = 1", [entity, id]).isNotEmpty;

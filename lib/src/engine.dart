@@ -187,7 +187,7 @@ final class Engine {
     entities: [
       CompanyEdge(_now), SiteEdge(_now), ProductTableEdge(_now), ProductFieldEdge(_now), ProductEdge(_now),
       const CurrencyEdge(), StockMovementEdge(stock), const PaymentEdge(), const DeliveryOptionEdge(), const DeliveryAreaEdge(),
-      const AccountEdge(), MemberEdge(_now, _pulledGrants.add),
+      const AccountEdge(), MemberEdge(_now, _pulledGrants.add), EmployeeEdge(accounts, _now),
     ],
   );
 
