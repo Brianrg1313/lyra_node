@@ -10,6 +10,9 @@ import '../../ids.dart';
 import '../../net/events.dart';
 import '../../storage/store.dart';
 
+/// A member's document as [Permissions] composes it before writing, with the keys it changes.
+typedef _Document = ({bool all, PermissionSections sections, TemplateRef? origin, bool custom, List<String> changed});
+
 /// **Who may do what in the company** (`session.md` session.permissions): the backend's `Members`,
 /// `Templates` and `Requests` over this master's store, with the same rules and the same refusals,
 /// so the app's screens can't tell which one answered.
@@ -163,7 +166,45 @@ final class Permissions {
     final target = _target(args["username"]);
     _guard(target.account, actor);
 
-    final before = Grants.read(_db, target.account);
+    final document = _compose(target.account, args, mine);
+    final now = _now();
+
+    Grants.write(_db, target.account, all: document.all, sections: document.sections, template: document.origin,
+      custom: document.custom, by: actor, now: now);
+    _changed(target.account, now);
+    _assigned(target.account, document, actor: actor, device: device);
+
+    return {"username": target.username};
+  }
+
+  /// Whether `employees.invite` args carry permissions for the invitation.
+  static bool invites(Map<String, Object?> args) => args["template"] != null || args["permissions"] != null;
+
+  /// The permissions an invitation carries (`employees.invite {template?, permissions?}`), checked
+  /// as [assign] checks them, inside the invitation's write. They are kept with the access the
+  /// person already had, none for someone new: accepting the job admits them with it (P-5), so
+  /// they enter already able to work, as in the cloud.
+  void invite(String account, Map<String, Object?> args, {required String actor, required Grant mine, String? device}) {
+    _local();
+    _guard(account, actor);
+
+    final document = _compose(account, args, mine);
+    final access = Grants.read(_db, account)?.access ?? false;
+
+    Grants.write(_db, account, access: access, all: document.all, sections: document.sections,
+      template: document.origin, custom: document.custom, by: actor, now: _now());
+    if (access) _changed(account, _now());
+    _assigned(account, document, actor: actor, device: device);
+  }
+
+  /// [account]'s document after [args] (`template?`, then `permissions?` over it, or over what they
+  /// had), refused as an escalation when [mine] doesn't hold every key it changes.
+  _Document _compose(
+    String account,
+    Map<String, Object?> args,
+    Grant mine,
+  ) {
+    final before = Grants.read(_db, account);
     var all = before?.all ?? false;
     var sections = PermissionCatalog.normalize(before?.sections, all: all);
     var origin = before?.template;
@@ -190,19 +231,21 @@ final class Permissions {
     }
 
     final changed = _mayGrant(mine, before, all, sections);
-    final now = _now();
 
-    Grants.write(_db, target.account, all: all, sections: sections, template: origin, custom: custom, by: actor, now: now);
-    _changed(target.account, now);
-    AuditLog(_db, now: _now).append(AuditKinds.permissionsAssigned, actor: actor, device: device, data: {
-      "account": target.account,
-      "all": all,
-      "template": _ref(origin),
-      "changed": changed,
-    });
-
-    return {"username": target.username};
+    return (all: all, sections: sections, origin: origin, custom: custom, changed: changed);
   }
+
+  void _assigned(
+    String account,
+    _Document document, {
+    required String actor,
+    String? device,
+  }) => AuditLog(_db, now: _now).append(AuditKinds.permissionsAssigned, actor: actor, device: device, data: {
+    "account": account,
+    "all": document.all,
+    "template": _ref(document.origin),
+    "changed": document.changed,
+  });
 
   /// `permissions.members.revoke {username}`: their access goes, their document stays.
   Map<String, Object?> revoke(Object? username, {required String actor, required Grant mine, String? device}) {

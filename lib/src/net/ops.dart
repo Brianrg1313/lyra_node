@@ -13,6 +13,7 @@ import '../crypto/sealed.dart';
 import '../domain/business/business.dart';
 import '../domain/inventory/inventory.dart';
 import '../domain/inventory/spreadsheet.dart';
+import '../domain/permissions/permissions.dart';
 import '../domain/sales/sales.dart';
 import '../sync/edge_sync.dart';
 import 'files.dart';
@@ -1037,10 +1038,21 @@ Future<Object?> _employee(OpCall call) {
 
 /// `employees.invite` (E-10). The activation code is answered once: the ledger keeps the answer
 /// without it, so a replay doesn't show it again (`employees.reissueActivation` does).
-Future<Object?> _invite(OpCall call) async => call.write<Map<String, Object?>>(
-  () => call.engine.employees.invite(call.args, actor: call.session.accountId, device: call.device.id),
-  keep: (answer) => <String, Object?>{...answer, "activation": null},
-);
+/// `employees.invite` (E-10). Permissions sent with it need `permissions.assign` too, as the cloud's
+/// invitation does, and are refused as `permissions.members.assign` refuses them.
+Future<Object?> _invite(OpCall call) async {
+  final grants = Permissions.invites(call.args);
+  if (grants && !_allows(call, _assignKey)) throw const EngineFailure(ErrorCodes.forbidden);
+
+  return call.write<Map<String, Object?>>(
+    () => call.engine.employees.invite(call.args, actor: call.session.accountId, device: call.device.id,
+      grant: grants
+        ? (account) => call.engine.permissions.invite(account, call.args,
+          actor: call.session.accountId, mine: call.connection.grant, device: call.device.id)
+        : null),
+    keep: (answer) => <String, Object?>{...answer, "activation": null},
+  );
+}
 
 /// `employees.reissueActivation {id}` (E-11).
 Future<Object?> _reissueActivation(OpCall call) async => call.write(

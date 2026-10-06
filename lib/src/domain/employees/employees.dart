@@ -281,8 +281,14 @@ final class Employees {
 
   /// `employees.invite {email | username, jobTitle, firstName?, lastName?}` (E-10), inside the
   /// op's write. An unknown person gets a `pending` account and the answer carries its activation
-  /// code, the only time it leaves the engine.
-  Map<String, Object?> invite(Map<String, Object?> args, {required String actor, String? device}) {
+  /// code, the only time it leaves the engine. [grant] files the invitation's permissions on the
+  /// invited account, in the same write (E-10, P-5).
+  Map<String, Object?> invite(
+    Map<String, Object?> args, {
+    required String actor,
+    String? device,
+    void Function(String account)? grant,
+  }) {
     final email = _optional(args["email"], "email")?.toLowerCase();
     final username = _optional(args["username"], "username")?.toLowerCase();
     final jobTitle = _text("JOB_TITLE", args["jobTitle"]);
@@ -327,6 +333,8 @@ final class Employees {
       "employment": id,
       "account": account,
     });
+
+    grant?.call(account);
 
     final pending = existing.isEmpty || existing.first["status"] == AccountStatus.pending.name;
 

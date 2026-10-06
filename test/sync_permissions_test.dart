@@ -142,6 +142,9 @@ void main() {
       throwsA(isA<EngineFailure>().having((failure) => failure.code, "code", "permissions_online")));
     expect(() => engine.store.write((_) => engine.permissions.createTemplate({"name": "Night shift"}, actor: owner)),
       throwsA(isA<EngineFailure>().having((failure) => failure.code, "code", "permissions_online")));
+    expect(() => engine.store.write((_) => engine.employees.invite({"email": "x@example.com", "jobTitle": "Cook"},
+      actor: owner, grant: (account) => engine.permissions.invite(account, {"template": "seller"}, actor: owner, mine: Grant.everything()))),
+      throwsA(isA<EngineFailure>().having((failure) => failure.code, "code", "permissions_online")));
     expect(engine.permissions.get(owner)["online"], isTrue);
     expect(engine.permissions.member("grace", viewer: owner)["online"], isTrue);
 

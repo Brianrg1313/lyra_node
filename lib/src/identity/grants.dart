@@ -143,11 +143,13 @@ abstract final class Grants {
     [now.toUtc().toIso8601String(), by, account],
   );
 
-  /// Writes [account]'s whole document and admits them. [sections] is normalized on the way in,
-  /// so a stored document never carries a key the catalog doesn't know; `all` stores none.
+  /// Writes [account]'s whole document and admits them, or with [access] false keeps it for when
+  /// they are (an invitation's, P-5). [sections] is normalized on the way in, so a stored document
+  /// never carries a key the catalog doesn't know; `all` stores none.
   static void write(
     Database db,
     String account, {
+    bool access = true,
     bool all = false,
     PermissionSections? sections,
     TemplateRef? template,
@@ -156,7 +158,7 @@ abstract final class Grants {
     required DateTime now,
   }) => db.execute(
     "INSERT INTO members (account, access, all_granted, sections, template_kind, template_id, custom, updated, "
-    "updated_by) VALUES (?1, 1, ?2, ?3, ?4, ?5, ?6, ?7, ?8) ON CONFLICT (account) DO UPDATE SET access = 1, "
+    "updated_by) VALUES (?1, ?9, ?2, ?3, ?4, ?5, ?6, ?7, ?8) ON CONFLICT (account) DO UPDATE SET access = ?9, "
     "all_granted = ?2, sections = ?3, template_kind = ?4, template_id = ?5, custom = ?6, updated = ?7, updated_by = ?8",
     [
       account,
@@ -167,6 +169,7 @@ abstract final class Grants {
       custom ? 1 : 0,
       now.toUtc().toIso8601String(),
       by,
+      access ? 1 : 0,
     ],
   );
 }

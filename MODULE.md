@@ -181,7 +181,8 @@ one writer. Phase 2 built storage, keys, oplog, identities, audit and the proces
   change, sealing to a scope or a person with no key in hand) and the accounts over the LAN: rails per country, sheets, nothing sealed in clear at rest (rows, ledger,
   oplog), refusals, edits, payments naming one, a session without the key, permissions.
 - `test/permissions_test.dart` — the cloud's permissions over the LAN: a job admits with nothing, templates copied and
-  `custom`, self/owner/escalation refusals, unknown keys, revoke and back, company templates, requests, live regrant.
+  `custom`, self/owner/escalation refusals, unknown keys, revoke and back, company templates, requests, live regrant;
+  an invitation's template waits unlisted and admits with it, refused as an assignment (and then nobody is invited).
 - `test/employees_test.dart` — the staff over the LAN: invitations and their code shown once, activation and its
   refusals, the list shaped by permission, job edits and their checks, the E-4 measures, sealed pay and profile never
   in clear (rows, oplog, ledger), the person's own reads and writes, the copy made for a person who had no key.
@@ -199,7 +200,7 @@ one writer. Phase 2 built storage, keys, oplog, identities, audit and the proces
   revocation, the allowance, the clock.
 - `test/sync_permissions_test.dart` — permissions on a master that syncs: the first upload carries them, the cloud's
   `member` counts (by id map or e-mail, the owner kept, a delete takes access), kept for someone admitted later, the
-  master's editor refused (`permissions_online`) until revoked or past the allowance.
+  master's editor and an invitation's template refused (`permissions_online`) until revoked or past the allowance.
 - `test/process_test.dart` — the built executable with the real vault (Windows only, tag `process`).
 - `test/browser_e2e_test.dart` — the app's LAN web build in a headless Chrome over DevTools: pairs by code, key in
   IndexedDB, signs in, reloads (`device.prove`), revoked (tag `browser`, needs `LYRA_WEB`).

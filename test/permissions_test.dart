@@ -25,9 +25,9 @@ void main() {
   Future<Map> member(String username, [RpcClient? as]) async =>
     await (as ?? owner).call(Ops.permissionsMembersDetail, args: {"username": username}) as Map;
 
-  /// Someone invited and activated on a phone of their own: their bound client.
-  Future<RpcClient> hire(String email) async {
-    final invited = await write(Ops.employeesInvite, {"email": email, "jobTitle": "Barista"}) as Map;
+  /// Someone invited (with [extra] args) and activated on a phone of their own: their bound client.
+  Future<RpcClient> hire(String email, {Map<String, Object?> extra = const {}, RpcClient? by}) async {
+    final invited = await write(Ops.employeesInvite, {"email": email, "jobTitle": "Barista", ...extra}, as: by) as Map;
     final client = await master.connect(await master.pairNative("Phone", code: (await master.openPairing())["code"] as String));
     final tokens = await client.call(Ops.authActivate, args: {
       "login": email,
@@ -65,6 +65,50 @@ void main() {
     test('nobody else is a member: an unknown username or one without a job (P-6)', () async {
       await expectRefusal(member("nobody"), "permission_member_not_found");
       await expectRefusal(assign("nobody", template: "seller"), "permission_member_not_found");
+    });
+  });
+
+  group('inviting with permissions', () {
+    test('the template waits with the invitation and the person enters with it (E-10, P-5, P-7)', () async {
+      final grace = await hire("grace@example.com", extra: {"template": "seller", "permissions": {"pos": {"cancel": true}}});
+
+      final card = await member("grace");
+      expect(card["access"], isTrue);
+      expect((card["template"] as Map)["id"], "seller");
+      expect(card["custom"], isTrue);
+      expect(((card["sections"] as Map)["pos"] as Map)["sell"], isTrue);
+      expect(((card["sections"] as Map)["pos"] as Map)["cancel"], isTrue);
+      final tree = ((await bootstrap(grace))["permissions"] as Map).values.single as Map;
+      expect(tree["pos"], isNotNull);
+    });
+
+    test('until accepted it opens nothing: no member is listed', () async {
+      await write(Ops.employeesInvite, {"email": "grace@example.com", "jobTitle": "Barista", "template": "seller"});
+
+      final members = await owner.call(Ops.permissionsMembersList) as List;
+      expect([for (final card in members) card["username"]], isNot(contains("grace")));
+    });
+
+    test('refused as an assignment is, and then nobody is invited (P-6)', () async {
+      Future<int> invitations() async => ((await owner.call(Ops.employeesList) as Map)["employees"] as List).length;
+      final before = await invitations();
+
+      await expectRefusal(write(Ops.employeesInvite, {"email": "x@example.com", "jobTitle": "Cook", "template": "nope"}),
+        "permission_template_not_found");
+      await expectRefusal(write(Ops.employeesInvite, {"email": "x@example.com", "jobTitle": "Cook", "permissions": {"pos": {"nope": true}}}),
+        "permissions_invalid");
+      expect(await invitations(), before);
+
+      final grace = await hire("grace@example.com");
+      await assign("grace", template: "manager");
+      await expectRefusal(write(Ops.employeesInvite, {"email": "x@example.com", "jobTitle": "Cook", "template": "owner"}, as: grace),
+        "escalation");
+
+      final alan = await hire("alan@example.com");
+      await assign("alan", permissions: {"employees": {"access": true, "manage": true}});
+      await expectRefusal(write(Ops.employeesInvite, {"email": "x@example.com", "jobTitle": "Cook", "template": "seller"}, as: alan),
+        ErrorCodes.forbidden);
+      await write(Ops.employeesInvite, {"email": "x@example.com", "jobTitle": "Cook"}, as: alan);
     });
   });
 
