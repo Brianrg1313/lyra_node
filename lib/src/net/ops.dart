@@ -789,6 +789,7 @@ Future<Object?> _summary(OpCall call) async => call.engine.stock.summary(
   page: _int(call, "page", 1),
   size: _int(call, "size", 30),
   match: call.args["match"] == null ? "" : call.text("match", max: 200),
+  tableId: call.args["tableId"] == null ? null : call.text("tableId", max: 64),
 );
 
 // ---------------------------------------------------------------- pos (`pos.md`)

@@ -430,6 +430,23 @@ void main() {
       expect(((await client.call(Ops.stockSummary, args: {"page": 1, "size": 30, "match": "cof"}) as Map)["total"]), 1);
     });
 
+    test('the summary reads the table it is asked for (ST-34)', () async {
+      await write(Ops.inventoryFieldsEdit, {"id": name, "summary": true});
+      final other = await table(title: "Storage");
+
+      final summary = await client.call(Ops.stockSummary, args: {"page": 1, "size": 30, "tableId": other}) as Map;
+      expect(summary["table"], other);
+      expect(summary["total"], 0);
+
+      final primary = await client.call(Ops.stockSummary, args: {"page": 1, "size": 30}) as Map;
+      expect(primary["table"], tableId);
+
+      await expectRefusal(
+        client.call(Ops.stockSummary, args: {"page": 1, "size": 30, "tableId": "550e8400-e29b-41d4-a716-446655440099"}),
+        ErrorCodes.notFound
+      );
+    });
+
     test('without a primary table there is no summary', () async {
       final (fresh, _) = await (await TestMaster.start()).signIn();
 

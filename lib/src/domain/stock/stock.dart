@@ -200,22 +200,23 @@ final class Stock {
     };
   }
 
-  /// `stock.summary {page, size, match?}` (ST-30 to ST-33): the primary table's products, the
-  /// photo first, the fields marked for the summary, then the three numbers.
-  Map<String, Object?> summary({required int page, required int size, String match = ""}) {
+  /// `stock.summary {page, size, match?, tableId?}` (ST-30 to ST-34): [tableId]'s products, or
+  /// the primary table's without one; the photo first, the fields marked for the summary, then
+  /// the three numbers.
+  Map<String, Object?> summary({required int page, required int size, String match = "", String? tableId}) {
     if (page < 1) throw const EngineFailure(ErrorCodes.invalidField, {"field": "page"});
     if (size < 1 || size > _maxSummaryPage) throw const EngineFailure(ErrorCodes.invalidField, {"field": "size"});
 
-    final table = _inventory.primaryTable;
-    if (table == null) throw const EngineFailure("no_primary_table");
+    final table = tableId == null ? _inventory.primaryTable : _inventory.tableOf(tableId);
+    if (table == null) throw EngineFailure(tableId == null ? "no_primary_table" : ErrorCodes.notFound);
 
-    final tableId = table["id"] as String;
-    final fields = _inventory.fieldsOf(tableId);
+    final id = table["id"] as String;
+    final fields = _inventory.fieldsOf(id);
     final shown = [for (final field in fields) if (field["summary"] == 1 && field["type"] != FieldTypes.stock) field];
     final image = fields.where((field) => field["type"] == FieldTypes.image).firstOrNull;
     final title = fields.where((field) => field["type"] == FieldTypes.title).firstOrNull;
     final tracked = fields.any((field) => field["type"] == FieldTypes.stock);
-    final (where, arguments) = _inventory.matchOf(tableId, fields, match);
+    final (where, arguments) = _inventory.matchOf(id, fields, match);
     final order = title == null ? "" : "json_extract(r.data, '\$.\"${title["id"]}\"') COLLATE NOCASE, ";
 
     final total = _db.select("SELECT count(*) AS n FROM inventory_records r WHERE $where", arguments).first["n"] as int;
@@ -227,7 +228,7 @@ final class Stock {
     );
 
     return {
-      "table": tableId,
+      "table": id,
       "total": total,
       "page": page,
       "size": size,

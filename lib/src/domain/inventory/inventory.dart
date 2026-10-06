@@ -544,6 +544,9 @@ final class Inventory {
   /// The primary table, or null when the company has none.
   Row? get primaryTable => _db.select("SELECT * FROM inventory_tables WHERE deleted = 0 AND is_primary = 1").firstOrNull;
 
+  /// A live table, or null (deleted, or another company's id).
+  Row? tableOf(String id) => _db.select("SELECT * FROM inventory_tables WHERE id = ? AND deleted = 0", [id]).firstOrNull;
+
   /// [tableId]'s fields in position order.
   List<Row> fieldsOf(String tableId) => _fields(tableId);
 
