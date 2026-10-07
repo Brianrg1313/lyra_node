@@ -447,6 +447,38 @@ void main() {
       );
     });
 
+    test('the summary sorts by a column of the table or by stock, empty values last (ST-35)', () async {
+      final price = (await field(tableId, "Price", "PRICE"))["id"] as String;
+      await write(Ops.inventoryFieldsEdit, {"id": price, "summary": true});
+      final tea = await record(tableId, {name: "Tea", price: "900"});
+      final water = await record(tableId, {name: "Water"});
+      await write(Ops.inventoryRecordsEdit, {"tableId": tableId, "id": product, "data": {price: "1200"}});
+      await move("add", 5);
+
+      Future<List<String>> sorted(String field, String dir) async {
+        final summary = await client.call(Ops.stockSummary, args: {
+          "page": 1, "size": 30, "sort": {"field": field, "dir": dir},
+        }) as Map;
+
+        return [for (final row in ((summary["data"] as Map)["values"] as List).cast<List>()) row.first as String];
+      }
+
+      // As numbers, not as text ("900" < "1200"), and the product without one at the end.
+      expect(await sorted(price, "asc"), [tea, product, water]);
+      expect(await sorted(price, "desc"), [product, tea, water]);
+      expect(await sorted(name, "desc"), [water, tea, product]);
+      // Ties keep the order the rows were written in.
+      expect(await sorted("stock", "desc"), [product, tea, water]);
+
+      final columns = ((await client.call(Ops.stockSummary, args: {"page": 1, "size": 30}) as Map)["columns"] as List).cast<Map>();
+      expect(columns.firstWhere((column) => column["key"] == "stock")["name"], "Stock");
+
+      await expectRefusal(
+        client.call(Ops.stockSummary, args: {"page": 1, "size": 30, "sort": {"field": "reserved"}}),
+        ErrorCodes.invalidField
+      );
+    });
+
     test('without a primary table there is no summary', () async {
       final (fresh, _) = await (await TestMaster.start()).signIn();
 

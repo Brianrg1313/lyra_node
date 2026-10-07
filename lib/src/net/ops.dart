@@ -785,12 +785,22 @@ Future<Object?> _history(OpCall call) async => call.engine.stock.history(
   size: _int(call, "size", 50),
 );
 
-Future<Object?> _summary(OpCall call) async => call.engine.stock.summary(
-  page: _int(call, "page", 1),
-  size: _int(call, "size", 30),
-  match: call.args["match"] == null ? "" : call.text("match", max: 200),
-  tableId: call.args["tableId"] == null ? null : call.text("tableId", max: 64),
-);
+/// `stock.summary {page, size, match?, tableId?, sort?: {field, dir?}}` (ST-30 to ST-35).
+Future<Object?> _summary(OpCall call) async {
+  final sort = call.args["sort"];
+  if (sort != null && (sort is! Map || sort["field"] is! String || (sort["dir"] != null && sort["dir"] != "asc" && sort["dir"] != "desc"))) {
+    throw const EngineFailure(ErrorCodes.invalidField, {"field": "sort"});
+  }
+
+  return call.engine.stock.summary(
+    page: _int(call, "page", 1),
+    size: _int(call, "size", 30),
+    match: call.args["match"] == null ? "" : call.text("match", max: 200),
+    tableId: call.args["tableId"] == null ? null : call.text("tableId", max: 64),
+    sortField: sort == null ? null : (sort as Map)["field"] as String,
+    descending: sort is Map && sort["dir"] == "desc",
+  );
+}
 
 // ---------------------------------------------------------------- pos (`pos.md`)
 

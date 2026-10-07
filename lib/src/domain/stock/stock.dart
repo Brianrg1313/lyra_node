@@ -200,10 +200,17 @@ final class Stock {
     };
   }
 
-  /// `stock.summary {page, size, match?, tableId?}` (ST-30 to ST-34): [tableId]'s products, or
-  /// the primary table's without one; the photo first, the fields marked for the summary, then
-  /// the three numbers.
-  Map<String, Object?> summary({required int page, required int size, String match = "", String? tableId}) {
+  /// `stock.summary {page, size, match?, tableId?, sort?}` (ST-30 to ST-35): [tableId]'s
+  /// products, or the primary table's without one; the photo first, the fields marked for the
+  /// summary, then the three numbers.
+  Map<String, Object?> summary({
+    required int page,
+    required int size,
+    String match = "",
+    String? tableId,
+    String? sortField,
+    bool descending = false,
+  }) {
     if (page < 1) throw const EngineFailure(ErrorCodes.invalidField, {"field": "page"});
     if (size < 1 || size > _maxSummaryPage) throw const EngineFailure(ErrorCodes.invalidField, {"field": "size"});
 
@@ -216,14 +223,17 @@ final class Stock {
     final image = fields.where((field) => field["type"] == FieldTypes.image).firstOrNull;
     final title = fields.where((field) => field["type"] == FieldTypes.title).firstOrNull;
     final tracked = fields.any((field) => field["type"] == FieldTypes.stock);
+    final stock = fields.where((field) => field["type"] == FieldTypes.stock).firstOrNull;
     final (where, arguments) = _inventory.matchOf(id, fields, match);
-    final order = title == null ? "" : "json_extract(r.data, '\$.\"${title["id"]}\"') COLLATE NOCASE, ";
+    final order = sortField == null
+      ? "coalesce(b.needs_review, 0) DESC, ${title == null ? "" : "${_valueOf(title)} COLLATE NOCASE, "}"
+      : _sortOf(sortField, descending, fields, stock);
 
     final total = _db.select("SELECT count(*) AS n FROM inventory_records r WHERE $where", arguments).first["n"] as int;
     final rows = _db.select(
       "SELECT r.id, r.data, b.on_hand, b.reserved, b.needs_review FROM inventory_records r "
       "LEFT JOIN stock_balances b ON b.product_id = r.id WHERE $where "
-      "ORDER BY coalesce(b.needs_review, 0) DESC, $order r.id LIMIT ? OFFSET ?",
+      "ORDER BY $order r.id LIMIT ? OFFSET ?",
       [...arguments, size, (page - 1) * size],
     );
 
@@ -244,7 +254,9 @@ final class Stock {
             "unit": field["unit"],
             "fixed": false,
           },
-        {"key": "stock", "name": null, "type": FieldTypes.stock, "fixed": true},
+        // Named after the table's stock column when there is one (ST-32), which is also what
+        // tells the app it can be sorted by (ST-35).
+        {"key": "stock", "name": stock?["name"], "type": FieldTypes.stock, "fixed": true},
         {"key": "reserved", "name": null, "type": FieldTypes.number, "fixed": true},
         {"key": "performance", "name": null, "type": FieldTypes.number, "fixed": true},
       ],
@@ -256,6 +268,37 @@ final class Stock {
         ],
       },
     };
+  }
+
+  /// The fields whose values compare as numbers when the summary is sorted by them (ST-35).
+  static const _numeric = {
+    FieldTypes.number, FieldTypes.decimal, FieldTypes.price, FieldTypes.currency, FieldTypes.discount,
+    FieldTypes.percentage, FieldTypes.measure, FieldTypes.counter,
+  };
+
+  static String _valueOf(Row field) => "json_extract(r.data, '\$.\"${field["id"]}\"')";
+
+  /// ST-35: the `ORDER BY` head for [sortField], a field of the table or `stock` (only on a table
+  /// with a stock column, as in the cloud). Empty values go last in both directions, so a
+  /// column half loaded never opens with its holes.
+  String _sortOf(String sortField, bool descending, List<Row> fields, Row? stock) {
+    final direction = descending ? "DESC" : "ASC";
+
+    if (sortField == "stock") {
+      if (stock == null) throw const EngineFailure(ErrorCodes.invalidField, {"field": "sort"});
+
+      return "coalesce(b.on_hand, 0) - coalesce(b.reserved, 0) $direction, ";
+    }
+
+    final field = fields.where((field) => field["id"] == sortField && field["type"] != FieldTypes.image).firstOrNull;
+    if (field == null) throw const EngineFailure(ErrorCodes.invalidField, {"field": "sort"});
+
+    final value = _valueOf(field);
+    final empty = "($value IS NULL OR $value = '')";
+
+    return _numeric.contains(field["type"])
+      ? "$empty, CAST($value AS REAL) $direction, "
+      : "$empty, $value COLLATE NOCASE $direction, ";
   }
 
   List<Object?> _summaryRow(Row row, List<Row> shown, Row? image, bool tracked) {
