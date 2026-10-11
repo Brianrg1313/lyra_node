@@ -21,7 +21,8 @@ import 'carriers.dart';
 final class Deliveries {
   Deliveries(this._store, this._clock, this._business, {DateTime Function()? now}) : _now = now ?? DateTime.now;
 
-  /// D-11, and the cloud's ceiling on options: a list a customer is read has to be short.
+  /// D-11, and the cloud's ceiling on options: a list a customer is read has to be short. Areas
+  /// are counted per map: the shared one, and each branch's (D-15).
   static const maxOptions = 20;
   static const maxAreas = 20;
 
@@ -44,6 +45,13 @@ final class Deliveries {
   static const coverages = ["local", "national", "international"];
   static const kinds = ["radius", "polygon"];
 
+  /// Which drawn areas are in force (D-15): one map every branch serves, or one per branch.
+  static const scopes = ["global", "branch"];
+
+  /// A branch id is the cloud's (the branches are read there), so all the master can check is
+  /// that it is one.
+  static final _uuid = RegExp(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", caseSensitive: false);
+
   /// The reach an option starts with (D-3): riders and apps work a city, a parcel carrier the country.
   static const _reach = {"own": "local", "platform": "local", "courier": "national"};
 
@@ -64,13 +72,14 @@ final class Deliveries {
 
   /// The area's edge field → its column.
   static const areaColumns = {
-    "name": "name", "kind": "kind", "latitude": "latitude", "longitude": "longitude", "radius": "radius",
+    "branch": "branch", "name": "name", "kind": "kind", "latitude": "latitude", "longitude": "longitude", "radius": "radius",
     "polygon": "polygon", "fee": "fee", "minimum": "minimum", "active": "active", "position": "position",
   };
 
   /// The settings' edge fields (on the company) → their columns.
   static const settingColumns = {
     "delivers": "delivers", "pickup": "pickup", "meetingPoint": "meeting_point", "deliveryNotes": "delivery_notes",
+    "deliveryScope": "delivery_scope",
   };
 
   final Store _store;
@@ -85,7 +94,7 @@ final class Deliveries {
   /// `delivery.get`: a company that lists a way to deliver has said yes by doing so, which is
   /// answered without being written back.
   Map<String, Object?> settings() {
-    final company = _db.select("SELECT delivers, pickup, meeting_point, delivery_notes FROM company").first;
+    final company = _db.select("SELECT delivers, pickup, meeting_point, delivery_notes, delivery_scope FROM company").first;
     final options = [for (final row in _live("delivery_options")) _option(row)];
     final delivers = company["delivers"] as int?;
 
@@ -94,15 +103,19 @@ final class Deliveries {
       "pickup": company["pickup"] == null ? null : company["pickup"] == 1,
       "notes": company["delivery_notes"],
       "meeting": company["meeting_point"] == 1,
+      "scope": company["delivery_scope"],
       "currency": _business.currency,
       "options": options,
     };
   }
 
-  /// `delivery.set {delivers?, pickup?, meeting?, notes?}` (D-1): `null` puts a flag back to "has
-  /// not said" and clears the notes; `meeting` has no third state.
+  /// `delivery.set {delivers?, pickup?, meeting?, notes?, scope?}` (D-1, D-15): `null` puts a flag
+  /// back to "has not said" and clears the notes; `meeting` and `scope` have no third state.
   Map<String, Object?> set(Map<String, Object?> args, {String? actor, String? device}) {
-    const keys = {"delivers": "delivers", "pickup": "pickup", "meeting": "meetingPoint", "notes": "deliveryNotes"};
+    const keys = {
+      "delivers": "delivers", "pickup": "pickup", "meeting": "meetingPoint", "notes": "deliveryNotes",
+      "scope": "deliveryScope",
+    };
     if (args.isEmpty || args.keys.any((key) => !keys.containsKey(key))) throw const EngineFailure(ErrorCodes.badRequest);
 
     final changes = <String, Object?>{};
@@ -110,6 +123,7 @@ final class Deliveries {
       changes[keys[key]!] = switch (key) {
         "notes" => _text(value, "notes", max: _notesLength, chars: _notesChars),
         "meeting" => value is bool ? value : throw const EngineFailure("invalid_delivery_flag"),
+        "scope" => _member(value, scopes) ?? (throw const EngineFailure("invalid_delivery_scope")),
         _ => value == null || value is bool ? value : throw const EngineFailure("invalid_delivery_flag"),
       };
     }
@@ -182,9 +196,10 @@ final class Deliveries {
 
   // ---------------------------------------------------------------- delivery.areas.*
 
-  /// `delivery.areas.list`.
+  /// `delivery.areas.list`: both maps (D-15), and which one is in force.
   Map<String, Object?> areas() => {
     "currency": _business.currency,
+    "scope": _db.select("SELECT delivery_scope FROM company").first["delivery_scope"],
     "areas": [for (final row in _live("delivery_areas")) _area(row)],
   };
 
@@ -193,13 +208,12 @@ final class Deliveries {
     if (!args.containsKey("name")) throw const EngineFailure(ErrorCodes.required, {"field": "name"});
 
     final row = _composeArea(const {
-      "name": null, "kind": null, "latitude": null, "longitude": null, "radius": null, "polygon": <Object?>[],
+      "branch": null, "name": null, "kind": null, "latitude": null, "longitude": null, "radius": null, "polygon": <Object?>[],
       "fee": null, "minimum": null, "active": true, "position": 100,
     }, args);
 
     _store.write((db) {
-      final count = db.select("SELECT count(*) AS n FROM delivery_areas WHERE deleted = 0").first["n"] as int;
-      if (count >= maxAreas) throw const EngineFailure("delivery_areas_limit", {"max": maxAreas});
+      _roomFor(db, row["branch"] as String?);
 
       final stamp = _clock.tick();
       final id = newId();
@@ -219,6 +233,8 @@ final class Deliveries {
 
     _store.write((db) {
       _find("delivery_areas", id);
+      // Moved to another map: it takes a place there (D-15).
+      if (row["branch"] != before["branch"]) _roomFor(db, row["branch"] as String?);
       _update(db, "delivery_areas", "delivery_area", areaColumns, id as String, before, row, actor: actor, device: device);
     });
 
@@ -310,9 +326,27 @@ final class Deliveries {
     return row;
   }
 
+  /// Refuses an area on a map that already holds [maxAreas]: the shared one ([branch] null), or
+  /// that branch's (D-11, D-15).
+  static void _roomFor(Database db, String? branch) {
+    final count = (branch == null
+      ? db.select("SELECT count(*) AS n FROM delivery_areas WHERE deleted = 0 AND branch IS NULL")
+      : db.select("SELECT count(*) AS n FROM delivery_areas WHERE deleted = 0 AND branch = ?", [branch])).first["n"] as int;
+    if (count >= maxAreas) throw const EngineFailure("delivery_areas_limit", {"max": maxAreas});
+  }
+
   /// An area's write over [current], checked whole (D-10): each kind keeps only its own shape.
   Map<String, Object?> _composeArea(Map<String, Object?> current, Map<String, Object?> args) {
     final row = {...current};
+
+    if (args.containsKey("branch")) {
+      final branch = args["branch"];
+      row["branch"] = switch (branch) {
+        null || "" => null,
+        String() when _uuid.hasMatch(branch) => branch.toLowerCase(),
+        _ => throw const EngineFailure("invalid_delivery_branch"),
+      };
+    }
 
     if (args.containsKey("name")) {
       row["name"] = _text(args["name"], "name", max: _nameLength) ??

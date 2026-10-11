@@ -66,6 +66,7 @@ one writer. Phase 2 built storage, keys, oplog, identities, audit and the proces
   (money in minor units, metres, millionths; `deleted`).
 - `lib/src/storage/migrations/m016_cloud_grants.dart` — `grant_nonces`: a cloud grant's nonce until it expired (one use).
 - `lib/src/storage/migrations/m017_sync_uploaded.dart` — `sync_link.uploaded`: the entities whose records a link uploaded.
+- `lib/src/storage/migrations/m018_delivery_branches.dart` — `company.delivery_scope`, `delivery_areas.branch` (areas per branch).
 - `lib/src/domain/deliveries/deliveries.dart` — `Deliveries` (`settings`, `set`, `providers`, options and areas created, edited
   checked whole, removed): `deliveries.md`.
 - `lib/src/domain/deliveries/carriers.dart` — `Carriers` (the cloud's carriers per country as of 2026-09: `offered`, `pick`, `name`).

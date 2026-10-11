@@ -1167,7 +1167,7 @@ Future<Object?> _request(OpCall call) async =>
 /// `delivery.get` (`deliveries.md`).
 Future<Object?> _delivery(OpCall call) async => call.engine.deliveries.settings();
 
-/// `delivery.set {delivers?, pickup?, meeting?, notes?}` (D-1).
+/// `delivery.set {delivers?, pickup?, meeting?, notes?, scope?}` (D-1, D-15).
 Future<Object?> _setDelivery(OpCall call) async =>
   call.write(() => call.engine.deliveries.set(call.args, actor: call.session.accountId, device: call.device.id));
 

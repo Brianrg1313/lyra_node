@@ -239,6 +239,7 @@ final class CompanyEdge extends _ColumnEntity {
     // The delivery settings live on the company, on both sides (`deliveries.md`).
     "delivers": EdgeColumn("delivers", EdgeKind.boolean), "pickup": EdgeColumn("pickup", EdgeKind.boolean),
     "meetingPoint": EdgeColumn("meeting_point", EdgeKind.boolean), "deliveryNotes": EdgeColumn("delivery_notes"),
+    "deliveryScope": EdgeColumn("delivery_scope"),
   };
 
   @override
@@ -950,7 +951,8 @@ final class DeliveryOptionEdge extends _DeliveryEdge {
 }
 
 /// An area drawn on the map: a point in millionths of a degree, `polygon` as `[[latitude,
-/// longitude]]` in millionths, `radius` in metres.
+/// longitude]]` in millionths, `radius` in metres; `branch` the cloud's id of the branch that
+/// delivers to it, null for every branch.
 final class DeliveryAreaEdge extends _DeliveryEdge {
   const DeliveryAreaEdge();
 
@@ -965,6 +967,7 @@ final class DeliveryAreaEdge extends _DeliveryEdge {
 
   @override
   Map<String, EdgeColumn> get columns => const {
+    "branch": EdgeColumn("branch"),
     "name": EdgeColumn("name"), "kind": EdgeColumn("kind"), "latitude": EdgeColumn("latitude", EdgeKind.integer),
     "longitude": EdgeColumn("longitude", EdgeKind.integer), "radius": EdgeColumn("radius", EdgeKind.integer),
     "polygon": EdgeColumn("polygon", EdgeKind.json), "fee": EdgeColumn("fee", EdgeKind.integer),

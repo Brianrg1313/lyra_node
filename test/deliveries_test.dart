@@ -35,7 +35,8 @@ void main() {
   group('delivery.get / set', () {
     test('nothing said is three nulls and no meeting; flags and notes change one key at a time (D-1)', () async {
       expect(await client.call(Ops.deliveryGet),
-        {"delivers": null, "pickup": null, "notes": null, "meeting": false, "currency": "USD", "options": []});
+        {"delivers": null, "pickup": null, "notes": null, "meeting": false, "scope": "global", "currency": "USD",
+          "options": []});
 
       await write(Ops.deliverySet, {"delivers": false});
       final settings = await write(Ops.deliverySet, {"pickup": true, "notes": "  Pedidos   antes de las 5 pm. "});
@@ -58,6 +59,8 @@ void main() {
     test('refusals: a flag that isn\'t one, meeting without a third state, an unknown key, notes the cloud refuses', () async {
       await expectRefusal(write(Ops.deliverySet, {"delivers": "yes"}), "invalid_delivery_flag");
       await expectRefusal(write(Ops.deliverySet, {"meeting": null}), "invalid_delivery_flag");
+      await expectRefusal(write(Ops.deliverySet, {"scope": null}), "invalid_delivery_scope");
+      await expectRefusal(write(Ops.deliverySet, {"scope": "city"}), "invalid_delivery_scope");
       await expectRefusal(write(Ops.deliverySet, {"color": "red"}), ErrorCodes.badRequest);
       await expectRefusal(write(Ops.deliverySet, {}), ErrorCodes.badRequest);
       await expectRefusal(write(Ops.deliverySet, {"notes": "x" * 256}), ErrorCodes.invalidField);
@@ -166,9 +169,10 @@ void main() {
 
       final list = await client.call(Ops.deliveryAreasList) as Map;
       expect(list["currency"], "USD");
+      expect(list["scope"], "global");
       final [east, center] = (list["areas"] as List).cast<Map>();
 
-      expect(center, pairs({"name": "Centro", "kind": "radius", "latitude": 10.488, "longitude": -66.8791,
+      expect(center, pairs({"branch": null, "name": "Centro", "kind": "radius", "latitude": 10.488, "longitude": -66.8791,
         "radius": 3000, "polygon": [], "fee": 200, "minimum": null, "active": true}));
       // The closing point is dropped: an outline is open.
       expect(east, pairs({"kind": "polygon", "latitude": null, "radius": null, "minimum": 1000, "polygon": [
@@ -216,6 +220,51 @@ void main() {
       }
       await expectRefusal(write(Ops.deliveryAreasCreate, {"name": "B", "kind": "polygon", "polygon": outline}),
         "delivery_areas_limit");
+    });
+  });
+
+  group('areas per branch (D-15)', () {
+    const outline = [[10.5, -66.9], [10.5, -66.8], [10.4, -66.8]];
+    const north = "0190a3b2-0000-7000-8000-000000000001";
+    const south = "0190a3b2-0000-7000-8000-000000000002";
+
+    test('the scope switches and keeps both maps; an area names its branch and moves to another', () async {
+      expect(await write(Ops.deliverySet, {"scope": "branch"}), pairs({"scope": "branch"}));
+
+      await write(Ops.deliveryAreasCreate, {"name": "Todas", "kind": "polygon", "polygon": outline});
+      final created = await write(Ops.deliveryAreasCreate, {"branch": north.toUpperCase(), "name": "Norte",
+        "kind": "polygon", "polygon": outline});
+      expect(created["scope"], "branch");
+
+      final norte = (created["areas"] as List).cast<Map>().firstWhere((area) => area["name"] == "Norte");
+      expect(norte["branch"], north);
+
+      final moved = await write(Ops.deliveryAreasEdit, {"id": norte["id"], "branch": south});
+      expect((moved["areas"] as List).cast<Map>().map((area) => area["branch"]), unorderedEquals([null, south]));
+
+      final shared = await write(Ops.deliveryAreasEdit, {"id": norte["id"], "branch": ""});
+      expect((shared["areas"] as List).cast<Map>().map((area) => area["branch"]), [null, null]);
+
+      expect(await write(Ops.deliverySet, {"scope": "global"}), pairs({"scope": "global"}));
+      expect(await areas(), hasLength(2));
+    });
+
+    test('20 areas per map, not per company; a branch that isn\'t an id is refused', () async {
+      await expectRefusal(write(Ops.deliveryAreasCreate, {"branch": "north", "name": "A", "kind": "polygon",
+        "polygon": outline}), "invalid_delivery_branch");
+
+      for (var i = 0; i < Deliveries.maxAreas; i++) {
+        await write(Ops.deliveryAreasCreate, {"branch": north, "name": "N$i", "kind": "polygon", "polygon": outline});
+      }
+      await expectRefusal(write(Ops.deliveryAreasCreate, {"branch": north, "name": "N", "kind": "polygon",
+        "polygon": outline}), "delivery_areas_limit");
+
+      final other = await write(Ops.deliveryAreasCreate, {"branch": south, "name": "S", "kind": "polygon",
+        "polygon": outline});
+      await write(Ops.deliveryAreasCreate, {"name": "Todas", "kind": "polygon", "polygon": outline});
+
+      final south0 = (other["areas"] as List).cast<Map>().firstWhere((area) => area["name"] == "S");
+      await expectRefusal(write(Ops.deliveryAreasEdit, {"id": south0["id"], "branch": north}), "delivery_areas_limit");
     });
   });
 
