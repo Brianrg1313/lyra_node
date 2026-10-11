@@ -185,7 +185,7 @@ final class Engine {
     sealKey: () => _keyring.derive("lyra/edge/key/v1"),
     now: _now,
     entities: [
-      CompanyEdge(_now), SiteEdge(_now), ProductTableEdge(_now), ProductFieldEdge(_now), ProductEdge(_now),
+      CompanyEdge(_now), SiteEdge(_now), ProductTableEdge(_now), ProductFieldEdge(_now), ProductEdge(_now), const PriceEdge(),
       const CurrencyEdge(), StockMovementEdge(stock), const PaymentEdge(), const DeliveryOptionEdge(), const DeliveryAreaEdge(),
       const AccountEdge(), MemberEdge(_now, _pulledGrants.add), EmployeeEdge(accounts, _now),
     ],

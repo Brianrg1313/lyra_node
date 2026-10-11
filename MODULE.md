@@ -67,6 +67,8 @@ one writer. Phase 2 built storage, keys, oplog, identities, audit and the proces
 - `lib/src/storage/migrations/m016_cloud_grants.dart` — `grant_nonces`: a cloud grant's nonce until it expired (one use).
 - `lib/src/storage/migrations/m017_sync_uploaded.dart` — `sync_link.uploaded`: the entities whose records a link uploaded.
 - `lib/src/storage/migrations/m018_delivery_branches.dart` — `company.delivery_scope`, `delivery_areas.branch` (areas per branch).
+- `lib/src/storage/migrations/m019_site_branches.dart` — `site_prices` (the site's own price per product, the edge `price`),
+  `sync_members.branches` / `.at` (the sites a person works in, their structure per site).
 - `lib/src/domain/deliveries/deliveries.dart` — `Deliveries` (`settings`, `set`, `providers`, options and areas created, edited
   checked whole, removed): `deliveries.md`.
 - `lib/src/domain/deliveries/carriers.dart` — `Carriers` (the cloud's carriers per country as of 2026-09: `offered`, `pick`, `name`).
@@ -89,7 +91,7 @@ one writer. Phase 2 built storage, keys, oplog, identities, audit and the proces
 - `lib/src/domain/inventory/cells.dart` — `Cells` (what a cell stores per field type, I-21; `read` for re-typing).
 - `lib/src/domain/stock/stock.dart` — `Stock` (`move` with the projection, manual holds and a ticket line's hold,
   `held`, `balanceOf`, `history`, `summary`, `rebuild`): `stock.md`.
-- `lib/src/domain/pos/pos.dart` — `Pos` (`summary`, `methods`, `catalog` by field type and cursor, `open` with the
+- `lib/src/domain/pos/pos.dart` — `Pos` (`summary`, `methods`, `catalog` by field type and cursor (the site's own price over the cells, POS-7b), `open` with the
   device's code, `line`, `close`, `cancel`, `list`; every figure computed from frozen lines, `lineTotal`): `pos.md`.
 - `lib/src/domain/pos/money.dart` — `Money` (minor units, percents as text, half away from zero, in integers).
 - `lib/src/domain/sales/sales.dart` — `Sales` (`catalog`, `list` paged in SQL by the measured stage, `row`, `detail`,
@@ -152,9 +154,9 @@ one writer. Phase 2 built storage, keys, oplog, identities, audit and the proces
   `SyncReport`. A live link uploads once the records of an entity a later version added (`sync_link.uploaded`).
 - `lib/src/sync/entities.dart` — `EdgeEntity` (one entity of the edge vocabulary on the engine's tables: `read`,
   `touched` by an oplog entry, `apply` a pulled change) and its kinds: `CompanyEdge`, `SiteEdge`, `ProductTableEdge`,
-  `ProductFieldEdge`, `ProductEdge`, `StockMovementEdge`, `PaymentEdge`, `CurrencyEdge`, `DeliveryOptionEdge`,
+  `ProductFieldEdge`, `ProductEdge`, `PriceEdge` (the site's own price, pull only), `StockMovementEdge`, `PaymentEdge`, `CurrencyEdge`, `DeliveryOptionEdge`,
   `DeliveryAreaEdge`, `AccountEdge` (with the person's
-  permissions, upload only), `MemberEdge` (the cloud's permissions, pull only), `EmployeeEdge` (a job and its person's
+  permissions, upload only), `MemberEdge` (the cloud's permissions, pull only; `branches` / `at` decide this site's), `EmployeeEdge` (a job and its person's
   e-mail, no sealed field; state forward only; opens a `pending` account for a job the cloud filed, activates it when the
   cloud says the job started); `edgeOrigin`.
 - `lib/src/process/paths.dart` — `NodePaths` (data folder per OS and its files).
@@ -208,6 +210,8 @@ one writer. Phase 2 built storage, keys, oplog, identities, audit and the proces
 - `test/sync_employees_test.dart` — jobs on a master that syncs: an invitation reaches the cloud, accepted there it starts
   here and opens the account, a job filed in the cloud makes its account, state forward only, the owner's job kept one,
   a link from before `employee` uploads the jobs it had, once.
+- `test/sync_branches_test.dart` — the master as one site of its company: its own price at the counter (new lines
+  only), a person kept to other sites out, a structure of their own here instead of the base, refusals.
 - `test/process_test.dart` — the built executable with the real vault (Windows only, tag `process`).
 - `test/browser_e2e_test.dart` — the app's LAN web build in a headless Chrome over DevTools: pairs by code, key in
   IndexedDB, signs in, reloads (`device.prove`), revoked (tag `browser`, needs `LYRA_WEB`).

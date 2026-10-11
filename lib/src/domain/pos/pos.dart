@@ -115,8 +115,8 @@ final class Pos {
     }
 
     final rows = _db.select(
-      "SELECT r.id, r.data, $key AS sort, b.on_hand, b.reserved FROM inventory_records r "
-      "LEFT JOIN stock_balances b ON b.product_id = r.id WHERE ${where.join(" AND ")} ORDER BY sort, r.id LIMIT ?",
+      "SELECT r.id, r.data, $key AS sort, b.on_hand, b.reserved, $_sitePrice FROM inventory_records r "
+      "LEFT JOIN stock_balances b ON b.product_id = r.id $_sitePriceJoin WHERE ${where.join(" AND ")} ORDER BY sort, r.id LIMIT ?",
       [...arguments, size + 1],
     );
     final page = rows.take(size).toList();
@@ -140,7 +140,7 @@ final class Pos {
 
   List<Object?> _catalogRow(Row row, _Columns columns, int decimals) {
     final data = jsonDecode(row["data"] as String) as Map<String, Object?>;
-    final product = columns.read(row["id"] as String, data, decimals);
+    final product = columns.read(row["id"] as String, data, decimals, site: _siteOf(row));
     final onHand = row["on_hand"] as int? ?? 0;
     final reserved = row["reserved"] as int? ?? 0;
     final images = columns.image == null ? null : data[columns.image];
@@ -161,6 +161,14 @@ final class Pos {
       ],
     ];
   }
+
+  /// The site's own price of `r`, beside its record (POS-7b).
+  static const _sitePrice = "sp.price AS site_price, sp.discount AS site_discount, sp.inherits_discount AS site_inherits";
+  static const _sitePriceJoin = "LEFT JOIN site_prices sp ON sp.product_id = r.id AND sp.deleted = 0";
+
+  static _SitePrice? _siteOf(Row row) => row["site_inherits"] == null
+    ? null
+    : (price: row["site_price"] as String?, discount: row["site_discount"] as String?, inheritsDiscount: row["site_inherits"] == 1);
 
   static String _cell(String fieldId) => "json_extract(r.data, '\$.\"$fieldId\"')";
 
@@ -455,13 +463,16 @@ final class Pos {
     final table = _inventory.primaryTable;
     final row = table == null
       ? null
-      : _db.select("SELECT data FROM inventory_records WHERE id = ? AND table_id = ? AND deleted = 0", [id, table["id"]])
-          .firstOrNull;
+      : _db.select(
+          "SELECT r.data, $_sitePrice FROM inventory_records r $_sitePriceJoin WHERE r.id = ? AND r.table_id = ? AND r.deleted = 0",
+          [id, table["id"]],
+        ).firstOrNull;
     if (row == null) throw const EngineFailure(ErrorCodes.notFound, {"field": "productId"});
 
     final tableId = table!["id"] as String;
     final columns = _Columns(_inventory.fieldsOf(tableId));
-    final product = columns.read(id, jsonDecode(row["data"] as String) as Map<String, Object?>, _business.decimals);
+    final product = columns.read(id, jsonDecode(row["data"] as String) as Map<String, Object?>, _business.decimals,
+      site: _siteOf(row));
 
     return (
       table: tableId,
@@ -613,6 +624,10 @@ final class Pos {
     DateTime.fromMillisecondsSinceEpoch(at.millisecondsSinceEpoch, isUtc: true).toIso8601String();
 }
 
+/// A product's own price at this site (POS-7b): `price` null is the `PRICE` cell's; unless
+/// `inheritsDiscount`, `discount` replaces the `DISCOUNT` cell (null: not on offer here).
+typedef _SitePrice = ({String? price, String? discount, bool inheritsDiscount});
+
 /// The primary table's fields by type, as the counter reads a product (POS-1).
 final class _Columns {
   _Columns(List<Row> fields) {
@@ -633,14 +648,18 @@ final class _Columns {
   late final bool tracked;
 
   /// [data]'s product: `price` is the list price net of its own discount (POS-7), null without a
-  /// price (POS-2).
+  /// price (POS-2). [site]'s figures stand for the cells they replace (POS-7b).
   ({String? name, String? sku, String? barcode, int? price, int? list, String? discount}) read(
-    String id, Map<String, Object?> data, int decimals,
+    String id, Map<String, Object?> data, int decimals, {_SitePrice? site}
   ) {
     String? text(String? field) => field == null || data[field] == null ? null : "${data[field]}";
 
-    final list = price == null ? null : Money.minor(data[price], decimals);
-    final percent = discount == null ? null : Money.percent(data[discount]);
+    final list = site?.price != null
+      ? Money.minor(site!.price, decimals)
+      : price == null ? null : Money.minor(data[price], decimals);
+    final percent = site != null && !site.inheritsDiscount
+      ? Money.percent(site.discount)
+      : discount == null ? null : Money.percent(data[discount]);
     final off = percent != null && percent != "0" ? percent : null;
 
     return (

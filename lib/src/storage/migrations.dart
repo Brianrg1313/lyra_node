@@ -20,6 +20,7 @@ import 'migrations/m015_deliveries.dart';
 import 'migrations/m016_cloud_grants.dart';
 import 'migrations/m017_sync_uploaded.dart';
 import 'migrations/m018_delivery_branches.dart';
+import 'migrations/m019_site_branches.dart';
 import 'store.dart';
 
 /// One schema step. [sql] is plain SQLite (several statements). Kept as Dart constants, not
@@ -36,7 +37,8 @@ final class Migration {
 /// a new one.
 const List<Migration> migrations = [m001Core, m002Network, m003Business, m004Inventory, m005Pos, m006Money,
   m007Sealed, m008MoneyMethods, m009Employees, m010CloudLink, m011Sync, m012Permissions,
-  m013CloudMembers, m014OwnerJob, m015Deliveries, m016CloudGrants, m017SyncUploaded, m018DeliveryBranches];
+  m013CloudMembers, m014OwnerJob, m015Deliveries, m016CloudGrants, m017SyncUploaded, m018DeliveryBranches,
+  m019SiteBranches];
 
 /// The database was written by a newer engine. Opening it could lose what that version added,
 /// so it's refused (plan §10.2): update the app on the master.

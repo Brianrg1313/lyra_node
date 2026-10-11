@@ -115,24 +115,37 @@ abstract final class Grants {
   /// Lays the cloud's document for [account] (`sync_members`, pulled by the edge sync) onto its
   /// row, access included. Answers whether the cloud had one. The owner's row is written like
   /// anyone's and changes nothing: [of] answers `all` for the owner whatever is stored.
+  ///
+  /// The document is the company's and this master one of its sites (`session.md`): a person
+  /// whose `branches` leave this site out has no access here, and their structure of their own
+  /// here (`at[<site>]`) is laid instead of the base.
   static bool fromCloud(Database db, String account, {required DateTime now}) {
     final id = cloudIdOf(db, account);
     if (id == null) return false;
 
     final row = db.select("SELECT * FROM sync_members WHERE cloud_id = ?", [id]).first;
-    final template = row["template"] == null ? null : jsonDecode(row["template"] as String) as Map<String, Object?>;
-    final sections = row["sections"] as String?;
+    final site = db.select("SELECT site FROM sync_link").firstOrNull?["site"] as String?;
+    final branches = row["branches"] == null ? null : (jsonDecode(row["branches"] as String) as List).cast<String>();
+    final own = site == null ? null : (jsonDecode(row["at"] as String) as Map<String, Object?>)[site];
+    final structure = own is Map<String, Object?>
+      ? own
+      : {"sections": row["sections"] == null ? null : jsonDecode(row["sections"] as String), "custom": row["custom"] == 1,
+          "template": row["template"] == null ? null : jsonDecode(row["template"] as String)};
+    final template = structure["template"] as Map<String, Object?>?;
+    final sections = structure["sections"];
 
     write(
       db,
       account,
-      all: row["all_granted"] == 1,
-      sections: sections == null ? null : PermissionCatalog.normalize(jsonDecode(sections)),
+      // A structure of its own is never `all`: the cloud sends none for someone with `all`.
+      all: own is! Map && row["all_granted"] == 1,
+      sections: sections == null ? null : PermissionCatalog.normalize(sections),
       template: template == null ? null : (scope: template["scope"] as String, id: template["id"] as String),
-      custom: row["custom"] == 1,
+      custom: structure["custom"] == true,
       now: now,
     );
-    if (row["access"] != 1) revoke(db, account, now: now);
+    final here = branches == null || site == null || branches.contains(site);
+    if (row["access"] != 1 || !here) revoke(db, account, now: now);
 
     return true;
   }

@@ -6,6 +6,7 @@ import 'package:sqlite3/sqlite3.dart';
 import '../audit/audit_log.dart';
 import '../domain/business/business.dart';
 import '../domain/inventory/inventory.dart';
+import '../domain/pos/money.dart';
 import '../domain/stock/stock.dart';
 import '../failure.dart';
 import '../identity/accounts.dart';
@@ -646,6 +647,97 @@ final class ProductEdge extends EdgeEntity {
   }
 }
 
+/// A product's own price at this site (contract §11 `price`, `pos.md` POS-7b): the cloud prices a
+/// product per branch and a master is one of them. Pulled only: the master has no editor for it,
+/// so nothing here touches one, and the counter reads it over the product's cells.
+final class PriceEdge extends EdgeEntity {
+  const PriceEdge();
+
+  @override
+  String get name => "price";
+
+  @override
+  String get local => "site_price";
+
+  @override
+  Map<String, String> get refs => const {"product": "product"};
+
+  /// Never uploaded: they are the cloud's.
+  @override
+  List<String> ids(Database db) => const [];
+
+  @override
+  EdgeRow? read(Database db, String id) {
+    final row = db.select("SELECT * FROM site_prices WHERE id = ?", [id]).firstOrNull;
+    if (row == null) return null;
+
+    return EdgeRow(
+      fields: {
+        "product": row["product_id"], "price": row["price"], "discount": row["discount"],
+        "inheritsDiscount": row["inherits_discount"] == 1,
+      },
+      hlc: Hlc.parse(row["updated_hlc"] as String),
+      deleted: row["deleted"] == 1,
+    );
+  }
+
+  @override
+  List<EdgeTouch> touched(Database db, OplogEntry entry) => const [];
+
+  @override
+  String apply(Database db, EdgeWrite write) {
+    if (write.op != EdgeOps.upsert && write.op != EdgeOps.delete) throw const EngineFailure("unsupported_op");
+
+    final current = read(db, write.id);
+    if (write.op == EdgeOps.delete) {
+      if (current != null) {
+        db.execute("UPDATE site_prices SET deleted = 1, updated_hlc = ? WHERE id = ?", [write.stamp.pack(), write.id]);
+        log(db, write, "removed");
+        _changed(db, current.fields["product"] as String, write.now);
+      }
+
+      return write.id;
+    }
+
+    final price = {
+      "product": null, "price": null, "discount": null, "inheritsDiscount": true,
+      ...?current?.fields,
+      ...write.fields,
+    };
+    final product = price["product"];
+    if (product is! String) EdgeEntity.invalid("product");
+    for (final field in const ["price", "discount"]) {
+      final value = price[field];
+      if (value != null && (value is! String || Money.minor(value, 0) == null)) EdgeEntity.invalid(field);
+    }
+    if (price["inheritsDiscount"] is! bool) EdgeEntity.invalid("inheritsDiscount");
+    // An offer the site inherits isn't the site's to state.
+    final discount = price["inheritsDiscount"] == true ? null : price["discount"];
+    if (discount != null && Money.percent(discount) == null) EdgeEntity.invalid("discount");
+
+    // One per product: a row the cloud made again under a new id replaces the old one.
+    db.execute("UPDATE site_prices SET deleted = 1 WHERE product_id = ? AND id != ? AND deleted = 0", [product, write.id]);
+    db.execute(
+      "INSERT INTO site_prices (id, product_id, price, discount, inherits_discount, deleted, updated_hlc) "
+      "VALUES (?1, ?2, ?3, ?4, ?5, 0, ?6) ON CONFLICT (id) DO UPDATE SET product_id = ?2, price = ?3, discount = ?4, "
+      "inherits_discount = ?5, deleted = 0, updated_hlc = ?6",
+      [write.id, product, price["price"], discount, price["inheritsDiscount"] == true ? 1 : 0, write.stamp.pack()],
+    );
+    log(db, write, write.created ? "created" : "edited", write.fields);
+    _changed(db, product, write.now);
+    if (current != null && current.fields["product"] != product) _changed(db, current.fields["product"] as String, write.now);
+
+    return write.id;
+  }
+
+  /// The product's table hears of it, as it would of an edit to the product: the counter's grid
+  /// reads it again.
+  static void _changed(Database db, String product, DateTime now) {
+    final table = db.select("SELECT table_id FROM inventory_records WHERE id = ?", [product]).firstOrNull?["table_id"] as String?;
+    if (table != null) _tableChanged(db, table, "records", now);
+  }
+}
+
 /// A stock movement (`stock.md`): a fact. One the cloud made is written by the ledger itself,
 /// like a replayed outbox's: never refused for the balance, flagged when it goes negative.
 final class StockMovementEdge extends EdgeEntity {
@@ -1076,6 +1168,8 @@ final class MemberEdge extends EdgeEntity {
         "sections": sections == null ? null : jsonDecode(sections),
         "template": template == null ? null : jsonDecode(template),
         "custom": row["custom"] == 1,
+        "branches": row["branches"] == null ? null : jsonDecode(row["branches"] as String),
+        "at": jsonDecode(row["at"] as String),
       },
       hlc: Hlc.parse(row["updated_hlc"] as String),
     );
@@ -1090,6 +1184,7 @@ final class MemberEdge extends EdgeEntity {
 
     final document = {
       "email": null, "access": false, "all": false, "sections": null, "template": null, "custom": false,
+      "branches": null, "at": const <String, Object?>{},
       ...?read(db, write.id)?.fields,
       ...write.fields,
       // The cloud took the person out of the company: no access, the document kept (P-5).
@@ -1104,15 +1199,19 @@ final class MemberEdge extends EdgeEntity {
     final sections = document["sections"];
     if (sections != null && sections is! Map) EdgeEntity.invalid("sections");
     final template = document["template"];
-    if (template != null &&
-        (template is! Map || !const {"global", "company"}.contains(template["scope"]) || template["id"] is! String)) {
-      EdgeEntity.invalid("template");
+    if (!_template(template)) EdgeEntity.invalid("template");
+    final branches = document["branches"];
+    if (branches != null && (branches is! List || branches.any((site) => site is! String))) EdgeEntity.invalid("branches");
+    final at = document["at"] ?? const <String, Object?>{};
+    if (at is! Map || at.values.any((own) => own is! Map || !_template(own["template"]) ||
+        (own["sections"] != null && own["sections"] is! Map) || (own["custom"] != null && own["custom"] is! bool))) {
+      EdgeEntity.invalid("at");
     }
 
     db.execute(
-      "INSERT INTO sync_members (cloud_id, email, access, all_granted, sections, template, custom, updated_hlc) "
-      "VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8) ON CONFLICT (cloud_id) DO UPDATE SET email = ?2, access = ?3, "
-      "all_granted = ?4, sections = ?5, template = ?6, custom = ?7, updated_hlc = ?8",
+      "INSERT INTO sync_members (cloud_id, email, access, all_granted, sections, template, custom, branches, at, updated_hlc) "
+      "VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10) ON CONFLICT (cloud_id) DO UPDATE SET email = ?2, access = ?3, "
+      "all_granted = ?4, sections = ?5, template = ?6, custom = ?7, branches = ?8, at = ?9, updated_hlc = ?10",
       [
         write.id,
         email,
@@ -1123,6 +1222,14 @@ final class MemberEdge extends EdgeEntity {
         sections == null ? null : jsonEncode(PermissionCatalog.normalize(sections)),
         template == null ? null : jsonEncode({"scope": (template as Map)["scope"], "id": template["id"]}),
         document["custom"] == true ? 1 : 0,
+        branches == null ? null : jsonEncode(branches),
+        jsonEncode({
+          for (final MapEntry(key: site, value: own as Map) in at.entries) "$site": {
+            "sections": own["sections"] == null ? null : PermissionCatalog.normalize(own["sections"]),
+            "template": own["template"] == null ? null : {"scope": own["template"]["scope"], "id": own["template"]["id"]},
+            "custom": own["custom"] == true,
+          },
+        }),
         write.stamp.pack(),
       ],
     );
@@ -1143,6 +1250,10 @@ final class MemberEdge extends EdgeEntity {
 
     return write.id;
   }
+
+  /// Null, or `{scope: global | company, id}`.
+  static bool _template(Object? template) => template == null ||
+    template is Map && const {"global", "company"}.contains(template["scope"]) && template["id"] is String;
 
   static String? _account(Database db, String cloudId, String? email) =>
     db.select("SELECT local_id FROM sync_ids WHERE entity = 'account' AND cloud_id = ?", [cloudId]).firstOrNull?["local_id"]
