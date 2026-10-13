@@ -129,7 +129,7 @@ abstract final class Typing {
       case FieldTypes.image:
         final urls = [for (final part in text.split(RegExp(r"[\s,;|]+"))) if (part.contains("://")) part];
         return urls.isEmpty ? null : urls.take(8).toList();
-      case FieldTypes.categories:
+      case FieldTypes.categories || FieldTypes.sizes:
         return Cells.read(type, text);
       default:
         final max = FieldTypes.long.contains(type) ? 10000 : 1000;

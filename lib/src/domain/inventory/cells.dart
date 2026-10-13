@@ -55,7 +55,7 @@ abstract final class Cells {
         return _day(text) ? text : null;
       case FieldTypes.datetime:
         return _instant(text) ? text : null;
-      case FieldTypes.categories:
+      case FieldTypes.categories || FieldTypes.sizes:
         final labels = raw is List
           ? [for (final label in raw) "$label".trim()]
           : text.split(RegExp(r"[,;|]")).map((label) => label.trim()).toList();
