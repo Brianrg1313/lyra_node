@@ -1,2 +1,60 @@
+# ─── Secrets and credentials ──────────────────────────────────────────────
+# Never commit these. Templates (*.example) are the only exception.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+*.cer
+*.csr
+*.p12
+*.pfx
+*.der
+*.jks
+*.keystore
+*.secret
+secrets/
+credentials/
+
+# ─── Local data, logs and runtime state ───────────────────────────────────
+*.log
+*.pid
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+*.hive
+# An engine data folder created by hand while developing (tests use temp dirs).
+/data/
+/.lyra/
+
+# ─── Dart / Pub ───────────────────────────────────────────────────────────
+# An executable: pubspec.lock is committed so every build resolves the same versions.
 .dart_tool/
+.packages
+.pub/
 build/
+coverage/
+doc/api/
+
+# ─── IDEs and editors ─────────────────────────────────────────────────────
+*.iml
+*.ipr
+*.iws
+.idea/
+.vscode/
+.history
+*.swp
+*~
+
+# ─── Tooling / AI assistants (local only) ─────────────────────────────────
+.claude/settings.local.json
+CLAUDE.local.md
+
+# ─── OS ───────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
